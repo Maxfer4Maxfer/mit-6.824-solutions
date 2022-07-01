@@ -1,6 +1,5 @@
 package raft
 
-//
 // this is an outline of the API that raft must expose to
 // the service (or tester). see comments below for
 // each of these functions for more details.
@@ -14,7 +13,6 @@ package raft
 //   each time a new entry is committed to the log, each Raft peer
 //   should send an ApplyMsg to the service (or tester)
 //   in the same server.
-//
 
 import (
 	"context"
@@ -35,10 +33,11 @@ import (
 const (
 	electionTimeoutUpperBoundary = 300 * time.Millisecond
 	electionTimeoutLowerBoundary = 150 * time.Millisecond
-	broadcastTime                = 10 * time.Millisecond
+	// The tester requires that the leader send heartbeat RPCs
+	// no more than ten times per second.
+	broadcastTime = 110 * time.Millisecond
 )
 
-//
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
 // tester) on the same server, via the applyCh passed to Make(). set
@@ -48,7 +47,6 @@ const (
 // in part 2D you'll want to send other kinds of messages (e.g.,
 // snapshots) on the applyCh, but set CommandValid to false for these
 // other uses.
-//
 type ApplyMsg struct {
 	Command      interface{}
 	CommandValid bool
@@ -94,9 +92,6 @@ func (le *LogEntry) DeepCopy() *LogEntry {
 	}
 }
 
-//
-// A Go object implementing a single Raft peer.
-//
 type Raft struct {
 	mu        sync.Mutex // Lock to protect shared access to this peer's state
 	logger    *log.Logger
@@ -109,11 +104,11 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
-	state           state
-	electionTimeout time.Duration
-	lastHeartbeat   time.Time
+	electionTimeout    time.Duration
+	electionCancelFunc context.CancelFunc
 
-	heartbeatCancelFunc context.CancelFunc
+	heartbeats    *heartbeatsEngine
+	lastHeartbeat time.Time
 
 	// latest term server has seen
 	// (initialized to 0 on first boot, increases monotonically)
@@ -140,19 +135,14 @@ func (rf *Raft) GetState() (int, bool) {
 	defer rf.mu.Unlock()
 
 	term = rf.currentTerm
-
-	if rf.state == leaderState {
-		isLeader = true
-	}
+	isLeader = rf.heartbeats.IsSendingInProgress()
 
 	return term, isLeader
 }
 
-//
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
-//
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
@@ -164,9 +154,7 @@ func (rf *Raft) persist() {
 	// rf.persister.SaveRaftState(data)
 }
 
-//
 // restore previously persisted state.
-//
 func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
@@ -187,10 +175,8 @@ func (rf *Raft) readPersist(data []byte) {
 	return
 }
 
-//
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
 // have more recent info since it communicate the snapshot on applyCh.
-//
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	// Your code here (2D).
 	return true
@@ -264,7 +250,6 @@ func (rf *Raft) AppendEntries(
 	rf.lastHeartbeat = time.Now()
 }
 
-//
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
 // server isn't the leader, returns false. otherwise start the
@@ -277,7 +262,6 @@ func (rf *Raft) AppendEntries(
 // if it's ever committed. the second return value is the current
 // term. the third return value is true if this server believes it is
 // the leader.
-//
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
@@ -288,7 +272,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	return index, term, isLeader
 }
 
-//
 // the tester doesn't halt goroutines created by Raft after each test,
 // but it does call the Kill() method. your code can use killed() to
 // check whether Kill() has been called. the use of atomic avoids the
@@ -298,16 +281,13 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // up CPU time, perhaps causing later tests to fail and generating
 // confusing debug output. any goroutine with a long-running loop
 // should call killed() to check whether it should stop.
-//
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
 	extendLoggerWithPrefix(rf.logger, commonLogTopic)
-	log.Printf("Resived the KILL signal")
+	log.Printf("Received the KILL signal")
 
-	if rf.heartbeatCancelFunc != nil {
-		rf.heartbeatCancelFunc()
-	}
+	rf.heartbeats.StopSending()
 }
 
 func (rf *Raft) killed() bool {
@@ -317,124 +297,62 @@ func (rf *Raft) killed() bool {
 }
 
 func (rf *Raft) sendHeartbeats() {
-}
-
-func (rf *Raft) stopHeartbeats() {
-}
-
-func (rf *Raft) heartbeating() {
 	log := extendLoggerWithPrefix(rf.logger, heartbeatingLogTopic)
-	log.Print("Start sending heartbets to my peers")
-
-	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	rf.mu.Lock()
-	rf.heartbeatCancelFunc = cancelFunc
+	args := &AppendEntriesArgs{
+		Term:     rf.currentTerm,
+		LeaderID: rf.me,
+	}
 	rf.mu.Unlock()
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("Stop hearbeating")
-
-			rf.mu.Lock()
-			rf.heartbeatCancelFunc = nil
-			rf.mu.Unlock()
-
-			return
-		default:
-			log.Print("Send hearbeat")
-
-			rf.mu.Lock()
-			args := &AppendEntriesArgs{
-				Term:     rf.currentTerm,
-				LeaderID: rf.me,
-			}
-			rf.mu.Unlock()
-
-			for i := range rf.peers {
-				if i == rf.me {
-					continue
-				}
-
-				go func(i int) {
-					reply := &AppendEntriesReply{}
-
-					if ok := rf.sendAppendEntries(i, args.DeepCopy(), reply); !ok {
-						log.Printf("WRN fail AppendEntries call to %d peer", i)
-					}
-
-					if rf.processIncomingTerm(log, i, reply.Term) {
-						if rf.heartbeatCancelFunc != nil {
-							rf.heartbeatCancelFunc()
-						}
-					}
-				}(i)
-			}
-
-			time.Sleep(broadcastTime)
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
 		}
+
+		go func(i int) {
+			reply := &AppendEntriesReply{}
+
+			if ok := rf.sendAppendEntries(i, args.DeepCopy(), reply); !ok {
+				log.Printf("WRN fail AppendEntries call to %d peer", i)
+			}
+
+			rf.processIncomingTerm(log, i, reply.Term)
+		}(i)
 	}
 }
 
-func (rf *Raft) processIncomingTerm(log *log.Logger, peerID int, term int) bool {
-	rf.mu.Lock()
-
-	if term > rf.currentTerm {
-		log.Printf(
-			"S%d has a higher term %d > %d",
-			peerID, term, rf.currentTerm,
-		)
-
-		rf.mu.Unlock()
-
-		rf.becomeFollower(term)
-
-		return true
-	}
-
-	rf.mu.Unlock()
-
-	return false
-}
-
-func (rf *Raft) becomeFollower(term int) {
-	log := extendLoggerWithPrefix(rf.logger, becomeFollowerLogTopic)
-
+func (rf *Raft) processIncomingTerm(log *log.Logger, peerID int, term int) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.state != followerState {
-		log.Printf("state %s -> %s", rf.state, followerState)
-		rf.state = followerState
-	}
+	if term > rf.currentTerm {
+		log.Printf("S%d has a higher term %d > %d", peerID, term, rf.currentTerm)
 
-	rf.votedFor = -1
-	rf.currentTerm = term
+		rf.heartbeats.StopSending()
+		rf.stopLeaderElection()
 
-	if rf.heartbeatCancelFunc != nil {
-		rf.heartbeatCancelFunc()
+		rf.votedFor = -1
+		rf.currentTerm = term
 	}
 }
 
-func (rf *Raft) interactWith(
+func (rf *Raft) askForVoting(
 	ctx context.Context, log *log.Logger,
 	peer int, args *RequestVoteArgs, resCh chan bool,
 ) {
 	reply := &RequestVoteReply{}
 
+	log.Printf("Sending RequestVote to S%d", peer)
+
 	if ok := rf.sendRequestVote(peer, args, reply); !ok {
 		log.Printf("WRN fail RequestVote call to S%d peer", peer)
 	}
 
+	log.Printf("Recived RequestVoteReply from S%d", peer)
+
 	rf.processIncomingTerm(log, args.CandidateID, args.Term)
-
-	if reply.Term > rf.currentTerm {
-		log.Printf("Stopping election, S%d has higher term %d > %d",
-			args.CandidateID, reply.Term, rf.currentTerm)
-
-		return
-	}
 
 	var res bool
 
@@ -450,6 +368,8 @@ func (rf *Raft) interactWith(
 
 	select {
 	case <-ctx.Done():
+		log.Printf("Stop ask S%d for voining", peer)
+
 		return
 	default:
 		resCh <- res
@@ -461,7 +381,6 @@ func (rf *Raft) prepareForVote(log *log.Logger) *RequestVoteArgs {
 	defer rf.mu.Unlock()
 
 	rf.currentTerm++
-	rf.state = candidateState
 	rf.votedFor = rf.me
 
 	log.Printf("Become a condidate and increase term to %d", rf.currentTerm)
@@ -474,7 +393,21 @@ func (rf *Raft) prepareForVote(log *log.Logger) *RequestVoteArgs {
 	}
 }
 
-func (rf *Raft) leaderElection() {
+func (rf *Raft) startLeaderElection() {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	rf.mu.Lock()
+	rf.electionCancelFunc = cancel
+	rf.mu.Unlock()
+
+	rf.leaderElection(ctx)
+}
+
+func (rf *Raft) stopLeaderElection() {
+	rf.electionCancelFunc()
+}
+
+func (rf *Raft) leaderElection(ctx context.Context) {
 	log := extendLoggerWithPrefix(rf.logger, leaderElectionLogTopic)
 
 	log.Printf("Starting new Leader election cycle")
@@ -484,44 +417,42 @@ func (rf *Raft) leaderElection() {
 	nVotedFor := 1           // already voted for themselves
 	resCh := make(chan bool) // true - votedFor; false - votedAgeinst
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
 		}
 
-		go rf.interactWith(ctx, log, i, args.DeepCopy(), resCh)
-
+		go rf.askForVoting(ctx, log, i, args.DeepCopy(), resCh)
 	}
 
-	for res := range resCh {
-		nVoted++
+	for {
+		select {
+		case <-ctx.Done():
+			log.Print("Stop election (term sig)")
+			return
+		case res := <-resCh:
+			nVoted++
 
-		if res {
-			nVotedFor++
-		}
-
-		log.Printf("(%d/%d) voted, %d for, %d against",
-			nVoted, len(rf.peers), nVotedFor, nVoted-nVotedFor)
-
-		if nVotedFor > len(rf.peers)/2 || nVoted == len(rf.peers)-1 {
-			if nVotedFor > len(rf.peers)/2 {
-				log.Print("I am a new leader")
-				rf.mu.Lock()
-				rf.state = leaderState
-				rf.mu.Unlock()
-				rf.heartbeating()
-			} else {
-				log.Print("Not luck, going to try the next time")
-				rf.mu.Lock()
-				rf.votedFor = -1
-				rf.state = followerState
-				rf.mu.Unlock()
+			if res {
+				nVotedFor++
 			}
 
-			return
+			log.Printf("(%d/%d) voted, %d for, %d against",
+				nVoted, len(rf.peers), nVotedFor, nVoted-nVotedFor)
+
+			if nVotedFor > len(rf.peers)/2 || nVoted == len(rf.peers) {
+				if nVotedFor > len(rf.peers)/2 {
+					log.Print("I am a new leader")
+					rf.heartbeats.StartSending()
+				} else {
+					log.Print("Not luck, going to try the next time")
+					rf.mu.Lock()
+					rf.votedFor = -1
+					rf.mu.Unlock()
+				}
+
+				return
+			}
 		}
 	}
 }
@@ -546,14 +477,14 @@ func (rf *Raft) ticker() {
 		// be started and to randomize sleeping time using
 		// time.Sleep().
 		rf.mu.Lock()
-		isLeader := rf.state == leaderState
-		leaderForgotUs := rf.lastHeartbeat.Add(rf.electionTimeout).Before(time.Now())
+		isLeader := rf.heartbeats.IsSendingInProgress()
+		longAlone := rf.lastHeartbeat.Add(rf.electionTimeout).Before(time.Now())
 		rf.mu.Unlock()
 
-		if !isLeader && leaderForgotUs {
+		if !isLeader && longAlone {
 			log.Printf("Did not see a leader to much")
 
-			rf.leaderElection()
+			rf.startLeaderElection()
 		}
 
 		max := int64(electionTimeoutUpperBoundary)
@@ -570,7 +501,6 @@ func (rf *Raft) ticker() {
 	}
 }
 
-//
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
@@ -580,7 +510,6 @@ func (rf *Raft) ticker() {
 // tester or service expects Raft to send ApplyMsg messages.
 // Make() must return quickly, so it should start goroutines
 // for any long-running work.
-//
 func Make(
 	peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg,
 ) *Raft {
@@ -590,15 +519,17 @@ func Make(
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
-	rf.votedFor = -1
-	rf.state = followerState
-	rf.log = []LogEntry{{0, ""}}
-
 	rf.logger = log.New(
 		os.Stdout,
 		fmt.Sprintf("S%d ", me),
 		log.Lshortfile|log.Lmicroseconds,
 	)
+
+	rf.heartbeats = initHeartbeatsEngine(
+		rf.logger, broadcastTime, rf.sendHeartbeats,
+	)
+	rf.votedFor = -1
+	rf.log = []LogEntry{{0, ""}} // need for first log index will be 1
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
