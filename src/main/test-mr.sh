@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# set -x
 
 #
 # map-reduce tests
@@ -95,6 +96,7 @@ else
   echo '---' wc output is not the same as mr-correct-wc.txt
   echo '---' wc test: FAIL
   failed_any=1
+  exit 1
 fi
 
 # wait for remaining workers and coordinator to exit.
@@ -126,6 +128,7 @@ else
   echo '---' indexer output is not the same as mr-correct-indexer.txt
   echo '---' indexer test: FAIL
   failed_any=1
+  exit 1
 fi
 
 wait
@@ -147,6 +150,7 @@ then
   echo '---' saw "$NT" workers rather than 2
   echo '---' map parallelism test: FAIL
   failed_any=1
+  exit 1 
 fi
 
 if cat mr-out* | grep '^parallel.* 2' > /dev/null
@@ -156,6 +160,7 @@ else
   echo '---' map workers did not run in parallel
   echo '---' map parallelism test: FAIL
   failed_any=1
+  exit 1
 fi
 
 wait
@@ -178,6 +183,7 @@ then
   echo '---' too few parallel reduces.
   echo '---' reduce parallelism test: FAIL
   failed_any=1
+  exit 1
 else
   echo '---' reduce parallelism test: PASS
 fi
@@ -205,6 +211,7 @@ else
   echo '---' map jobs ran incorrect number of times "($NT != 8)"
   echo '---' job count test: FAIL
   failed_any=1
+  exit 1
 fi
 
 wait
@@ -233,6 +240,7 @@ sleep 1
 # `jobs` ensures that any completed old processes from other tests
 # are not waited upon.
 jobs &> /dev/null
+
 if [[ "$OSTYPE" = "darwin"* ]]
 then
   # bash on the Mac doesn't have wait -n
@@ -246,14 +254,14 @@ else
   wait -n
 fi
 
-rm -f $DF
-
 # a process has exited. this means that the output should be finalized
 # otherwise, either a worker or the coordinator exited early
 sort mr-out* | grep . > mr-wc-all-initial
 
 # wait for remaining workers and coordinator to exit.
 wait
+
+rm -f $DF
 
 # compare initial and final outputs
 sort mr-out* | grep . > mr-wc-all-final
@@ -264,12 +272,14 @@ else
   echo '---' output changed after first worker exited
   echo '---' early exit test: FAIL
   failed_any=1
+  exit 1
 fi
 rm -f mr-*
 
 #########################################################
 echo '***' Starting crash test.
 
+pwd
 # generate the correct output
 ../mrsequential ../../mrapps/nocrash.so ../pg*txt || exit 1
 sort mr-out-0 > mr-correct-crash.txt
@@ -314,6 +324,7 @@ else
   echo '---' crash output is not the same as mr-correct-crash.txt
   echo '---' crash test: FAIL
   failed_any=1
+  exit 1
 fi
 
 #########################################################
