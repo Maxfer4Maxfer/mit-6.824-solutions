@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -32,7 +33,7 @@ const (
 	electionTimeoutLowerBoundary = 150 * time.Millisecond
 	// The tester requires that the leader send heartbeat RPCs
 	// no more than ten times per second.
-	broadcastTime = 110 * time.Millisecond
+	broadcastTime = 80 * time.Millisecond
 )
 
 // as each Raft peer becomes aware that successive log entries are
@@ -58,7 +59,7 @@ type ApplyMsg struct {
 
 type LogEntry struct {
 	Term    int
-	Command string
+	Command interface{}
 }
 
 func (le *LogEntry) DeepCopy() *LogEntry {
@@ -75,16 +76,21 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
+	cancel    context.CancelFunc  // set by Kill()
+	ctx       context.Context     // for liveness check
 
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
-	electionTimeout    time.Duration
-	electionCancelFunc context.CancelFunc
+	// applyCh is a channel on which the
+	// tester or service expects Raft to send ApplyMsg messages.
+	applyCh chan ApplyMsg
 
-	heartbeats    *heartbeatsEngine
-	lastHeartbeat time.Time
+	resetElectionTimeoutCh chan struct{}
+	electionCancelFunc     context.CancelFunc
+
+	heartbeats *heartbeatsEngine
 
 	// latest term server has seen
 	// (initialized to 0 on first boot, increases monotonically)
@@ -96,6 +102,60 @@ type Raft struct {
 	// log entries; each entry contains command for state machine,
 	// and term when entry was received by leader (first index is 1)
 	log []LogEntry
+
+	// index of highest log entry known to be committed
+	// initialized to 0, intcreases monotonically
+	// available only via getter and setter methods
+	vCommitIndex    uint64
+	commitIndexCond *sync.Cond
+
+	// index of highest log entry applied to state machine
+	// initialized to 0, intcreases monotonically
+	lastApplied uint64
+}
+
+func (rf *Raft) commitIndex() uint64 {
+	return atomic.LoadUint64(&rf.vCommitIndex)
+}
+
+func (rf *Raft) setCommitIndex(ci uint64) {
+	if ci > rf.commitIndex() {
+		atomic.StoreUint64(&rf.vCommitIndex, ci)
+		rf.commitIndexCond.Broadcast()
+	}
+}
+
+func (rf *Raft) resetElectionTimeout() {
+	select {
+	case rf.resetElectionTimeoutCh <- struct{}{}:
+	default:
+	}
+}
+
+func (rf *Raft) applyLog() {
+	log := extendLoggerWithPrefix(rf.logger, applyLogTopic)
+
+	rf.commitIndexCond = sync.NewCond(&sync.Mutex{})
+
+	rf.commitIndexCond.L.Lock()
+
+	go func() {
+		for {
+			rf.commitIndexCond.Wait()
+
+			rf.mu.Lock()
+			for i := rf.lastApplied + 1; i <= rf.commitIndex(); i++ {
+				log.Printf("Apply %d index, %d term", i, rf.log[i].Term)
+				rf.lastApplied++
+				rf.applyCh <- ApplyMsg{
+					Command:      rf.log[i].Command,
+					CommandValid: true,
+					CommandIndex: int(rf.lastApplied),
+				}
+			}
+			rf.mu.Unlock()
+		}
+	}()
 }
 
 // return currentTerm and whether this server
@@ -168,64 +228,57 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
 }
 
-func (rf *Raft) RequestVote(
-	args *RequestVoteArgs, reply *RequestVoteReply,
+func (rf *Raft) AppendEntries(
+	args *AppendEntriesArgs, reply *AppendEntriesReply,
 ) {
-	log := extendLoggerWithPrefix(rf.logger, leaderElectionLogTopic)
+	var log *log.Logger
 
-	// Your code here (2A, 2B).
-	log.Printf("RequestVote call from S%d", args.CandidateID)
+	if len(args.Entries) == 0 {
+		log = extendLoggerWithPrefix(rf.logger, heartbeatingLogTopic)
+	} else {
+		log = extendLoggerWithPrefix(rf.logger, appendEntriesLogTopic)
+	}
 
-	rf.processIncomingTerm(log, args.CandidateID, args.Term)
+	log.Printf("AppendEntries from S%d", args.LeaderID)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	reply.VoteGranted = false
+	rf.processIncomingTerm(log, args.LeaderID, args.Term)
+
+	reply.Success = false
 	reply.Term = rf.currentTerm
 
 	switch {
 	case args.Term < rf.currentTerm:
 		log.Printf("Incoming term smaller %d < %d", args.Term, rf.currentTerm)
-	case rf.votedFor != -1:
-		log.Printf("Already voted for %d", rf.votedFor)
-	case rf.votedFor == args.CandidateID:
-		log.Printf("Already voted for incoming candidate %d", rf.votedFor)
-	// candidate’s log is at least as up-to-date as receiver’s log
-	case len(rf.log)-1 < args.LastLogIndex:
-		log.Printf("Has smaller log size %d != %d", len(rf.log)-1, args.LastLogIndex)
-	case rf.log[args.LastLogIndex].Term != args.LastLogTerm:
+	case uint64(len(rf.log)-1) < args.PrevLogIndex:
+		log.Printf("Has smaller log size %d != %d", len(rf.log)-1, args.PrevLogIndex)
+	case rf.log[args.PrevLogIndex].Term != args.PrevLogTerm:
 		log.Printf("has log discrepancy %d != %d",
-			rf.log[args.LastLogIndex].Term, args.LastLogTerm)
+			rf.log[args.PrevLogIndex].Term, args.PrevLogTerm)
+		rf.log = rf.log[:args.PrevLogIndex]
+
+		fallthrough
 	default:
-		reply.VoteGranted = true
-		rf.votedFor = args.CandidateID
-		log.Printf("Voted for %d ", args.CandidateID)
+		reply.Success = true
+		rf.resetElectionTimeout()
+		rf.log = append(rf.log, args.Entries...)
+
+		if args.LeaderCommit > rf.commitIndex() {
+			log.Printf("Incoming CommitIndex is higher %d > %d",
+				args.LeaderCommit, rf.commitIndex())
+
+			min := args.LeaderCommit
+
+			if len(args.Entries) != 0 &&
+				args.LeaderCommit > uint64(len(rf.log)-1) {
+				min = uint64(len(rf.log) - 1)
+			}
+
+			rf.setCommitIndex(min)
+		}
 	}
-}
-
-func (rf *Raft) AppendEntries(
-	args *AppendEntriesArgs, reply *AppendEntriesReply,
-) {
-	log := extendLoggerWithPrefix(rf.logger, appendEntriesLogTopic)
-
-	log.Printf("AppendEntries from S%d", args.LeaderID)
-
-	rf.processIncomingTerm(log, args.LeaderID, args.Term)
-
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	reply.Success = false
-	reply.Term = rf.currentTerm
-
-	if args.Term < rf.currentTerm {
-		log.Printf("Incoming term smaller %d < %d", args.Term, rf.currentTerm)
-
-		return
-	}
-
-	rf.lastHeartbeat = time.Now()
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
@@ -241,16 +294,92 @@ func (rf *Raft) AppendEntries(
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
-
 	// Your code here (2B).
+	log := extendLoggerWithPrefix(rf.logger, startLogTopic)
+
+	log.Printf("Start call %v", command)
+
 	if !rf.heartbeats.IsSendingInProgress() {
-		return -1, -1, false
+		log.Printf("Not a leader")
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
+		return -1, rf.currentTerm, false
 	}
 
-	return index, term, isLeader
+	var (
+		doneCh      = make(chan int)
+		cAnswers    = float64(1) // already count itself
+		le          = LogEntry{rf.currentTerm, command}
+		ctx, cancel = context.WithCancel(context.Background())
+	)
+
+	rf.mu.Lock()
+	args := &AppendEntriesArgs{
+		Term:         rf.currentTerm,
+		LeaderID:     rf.me,
+		PrevLogIndex: uint64(len(rf.log) - 1),
+		PrevLogTerm:  rf.log[len(rf.log)-1].Term,
+		LeaderCommit: rf.commitIndex(),
+		Entries:      []LogEntry{le},
+	}
+
+	rf.log = append(rf.log, le)
+
+	rf.mu.Unlock()
+
+	log.Printf("append a local log")
+
+	go func() {
+		for _ = range doneCh {
+			cAnswers++
+			log.Printf("(%.0f/%d) answers", cAnswers, len(rf.peers))
+
+			if cAnswers == math.Ceil(float64(len(rf.peers))/2) {
+				log.Printf("increasing comminIndex")
+
+				rf.setCommitIndex(args.PrevLogIndex + 1)
+
+				cancel()
+			}
+		}
+	}()
+
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+
+		go func(peerID int) {
+			reply := &AppendEntriesReply{}
+
+			log.Printf("AppendEntires sent to %d", peerID)
+
+			for {
+				if ok := rf.sendAppendEntries(peerID, args.DeepCopy(), reply); !ok {
+					log.Printf("WRN fail AppendEntries call to %d peer", peerID)
+
+					continue
+				}
+
+				break
+			}
+
+			log.Printf("AppendEntires reply from %d", peerID)
+
+			rf.mu.Lock()
+			rf.processIncomingTerm(log, peerID, reply.Term)
+			rf.mu.Unlock()
+
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				doneCh <- peerID
+			}
+		}(i)
+	}
+
+	return int(args.PrevLogIndex + 1), args.Term, true
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -269,6 +398,8 @@ func (rf *Raft) Kill() {
 	log.Printf("Received the KILL signal")
 
 	rf.heartbeats.StopSending()
+	rf.stopLeaderElection()
+	rf.cancel()
 }
 
 func (rf *Raft) killed() bool {
@@ -282,8 +413,11 @@ func (rf *Raft) sendHeartbeats() {
 
 	rf.mu.Lock()
 	args := &AppendEntriesArgs{
-		Term:     rf.currentTerm,
-		LeaderID: rf.me,
+		Term:         rf.currentTerm,
+		LeaderID:     rf.me,
+		PrevLogIndex: uint64(len(rf.log) - 1),
+		PrevLogTerm:  rf.log[len(rf.log)-1].Term,
+		LeaderCommit: rf.commitIndex(),
 	}
 	rf.mu.Unlock()
 
@@ -299,15 +433,14 @@ func (rf *Raft) sendHeartbeats() {
 				log.Printf("WRN fail AppendEntries call to %d peer", i)
 			}
 
+			rf.mu.Lock()
 			rf.processIncomingTerm(log, i, reply.Term)
+			rf.mu.Unlock()
 		}(i)
 	}
 }
 
 func (rf *Raft) processIncomingTerm(log *log.Logger, peerID int, term int) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
 	if term > rf.currentTerm {
 		log.Printf("S%d has a higher term %d > %d", peerID, term, rf.currentTerm)
 
@@ -337,6 +470,9 @@ func Make(
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
+	rf.ctx, rf.cancel = context.WithCancel(context.Background())
+	rf.resetElectionTimeoutCh = make(chan struct{})
+
 	rf.logger = log.New(
 		os.Stdout,
 		fmt.Sprintf("S%d ", me),
@@ -349,11 +485,14 @@ func Make(
 	rf.votedFor = -1
 	rf.log = []LogEntry{{0, ""}} // need for first log index will be 1
 
+	rf.applyCh = applyCh
+
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
+	rf.applyLog()
 
 	return rf
 }

@@ -8,7 +8,9 @@ const (
 	commonLogTopic         logTopic = "COMMON"
 	leaderElectionLogTopic logTopic = "ELECT"
 	tickerLogTopic         logTopic = "TICKR"
-	heartbeatingLogTopic    logTopic = "HRTBT"
+	applyLogTopic          logTopic = "APPLY"
+	heartbeatingLogTopic   logTopic = "HRTBT"
+	startLogTopic          logTopic = "START"
 	appendEntriesLogTopic  logTopic = "APPND"
 	becomeFollowerLogTopic logTopic = "BCMFL"
 )

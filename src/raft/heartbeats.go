@@ -41,7 +41,10 @@ func (hbe *heartbeatsEngine) StartSending() {
 }
 
 func (hbe *heartbeatsEngine) StopSending() {
-	atomic.StoreInt32(&hbe.run, 0)
+	if atomic.LoadInt32(&hbe.run) == 1 {
+		hbe.log.Print("Stop sending heartbeats")
+		atomic.StoreInt32(&hbe.run, 0)
+	}
 }
 
 func (hbe *heartbeatsEngine) IsSendingInProgress() bool {
@@ -60,7 +63,7 @@ func (hbe *heartbeatsEngine) processing() {
 	for {
 		switch {
 		case atomic.LoadInt32(&hbe.run) == 0:
-			hbe.log.Print("Stop sending heartbeats")
+			hbe.log.Print("Waiting to start sending heartbeats")
 			hbe.cond.Wait()
 		default:
 			hbe.sendHeartbeatsFunc()

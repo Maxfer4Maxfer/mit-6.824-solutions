@@ -69,14 +69,24 @@ func (rf *Raft) sendRequestVote(
 }
 
 type AppendEntriesArgs struct {
-	Term         int // leader’s term
-	LeaderID     int // so follower can redirect clients
-	PrevLogIndex int // index of log entry immediately preceding new ones
-	PrevLogTerm  int // term of prevLogIndex entry
+	// leader’s term
+	Term int
+
+	// so follower can redirect clients
+	LeaderID int
+
+	// index of log entry immediately preceding new ones
+	PrevLogIndex uint64
+
+	// term of prevLogIndex entry
+	PrevLogTerm int
+
 	// log entries to store (empty for heartbeat;
 	// may send more than one for efficiency)
-	Entries      []LogEntry
-	LeaderCommit int // leader’s commitIndex
+	Entries []LogEntry
+
+	// leader’s commitIndex
+	LeaderCommit uint64
 }
 
 func (a *AppendEntriesArgs) DeepCopy() *AppendEntriesArgs {
