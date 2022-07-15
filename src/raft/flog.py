@@ -81,6 +81,11 @@ def main(
     panic = False
     for line in input_:
         try:
+            if line.startswith("Test"):
+                console.print(line, end="")
+                console.print("#" * console.width)
+                continue
+
             # S5 ELECT 18:19:20.292541 raft.go:360: 6 peer voted against us
             peer, topic, time, code_line, *msg = line.strip().split(" ")
 

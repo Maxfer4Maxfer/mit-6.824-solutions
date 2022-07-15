@@ -33,7 +33,7 @@ const (
 	electionTimeoutLowerBoundary = 150 * time.Millisecond
 	// The tester requires that the leader send heartbeat RPCs
 	// no more than ten times per second.
-	broadcastTime = 80 * time.Millisecond
+	broadcastTime = 110 * time.Millisecond
 )
 
 // as each Raft peer becomes aware that successive log entries are
@@ -87,10 +87,8 @@ type Raft struct {
 	// tester or service expects Raft to send ApplyMsg messages.
 	applyCh chan ApplyMsg
 
-	resetElectionTimeoutCh chan struct{}
-	electionCancelFunc     context.CancelFunc
-
-	heartbeats *heartbeatsEngine
+	leaderElection *leaderElectionEngine
+	heartbeats     *heartbeatsEngine
 
 	// latest term server has seen
 	// (initialized to 0 on first boot, increases monotonically)
@@ -106,29 +104,22 @@ type Raft struct {
 	// index of highest log entry known to be committed
 	// initialized to 0, intcreases monotonically
 	// available only via getter and setter methods
-	vCommitIndex    uint64
+	vCommitIndex    int64
 	commitIndexCond *sync.Cond
 
 	// index of highest log entry applied to state machine
 	// initialized to 0, intcreases monotonically
-	lastApplied uint64
+	lastApplied int
 }
 
-func (rf *Raft) commitIndex() uint64 {
-	return atomic.LoadUint64(&rf.vCommitIndex)
+func (rf *Raft) commitIndex() int {
+	return int(atomic.LoadInt64(&rf.vCommitIndex))
 }
 
-func (rf *Raft) setCommitIndex(ci uint64) {
+func (rf *Raft) setCommitIndex(ci int) {
 	if ci > rf.commitIndex() {
-		atomic.StoreUint64(&rf.vCommitIndex, ci)
+		atomic.StoreInt64(&rf.vCommitIndex, int64(ci))
 		rf.commitIndexCond.Broadcast()
-	}
-}
-
-func (rf *Raft) resetElectionTimeout() {
-	select {
-	case rf.resetElectionTimeoutCh <- struct{}{}:
-	default:
 	}
 }
 
@@ -145,7 +136,7 @@ func (rf *Raft) applyLog() {
 
 			rf.mu.Lock()
 			for i := rf.lastApplied + 1; i <= rf.commitIndex(); i++ {
-				log.Printf("Apply %d index, %d term", i, rf.log[i].Term)
+				log.Printf("Apply index: %d, term: %d", i, rf.log[i].Term)
 				rf.lastApplied++
 				rf.applyCh <- ApplyMsg{
 					Command:      rf.log[i].Command,
@@ -252,18 +243,29 @@ func (rf *Raft) AppendEntries(
 	switch {
 	case args.Term < rf.currentTerm:
 		log.Printf("Incoming term smaller %d < %d", args.Term, rf.currentTerm)
-	case uint64(len(rf.log)-1) < args.PrevLogIndex:
+	case len(rf.log)-1 < args.PrevLogIndex:
 		log.Printf("Has smaller log size %d != %d", len(rf.log)-1, args.PrevLogIndex)
 	case rf.log[args.PrevLogIndex].Term != args.PrevLogTerm:
-		log.Printf("has log discrepancy %d != %d",
+		log.Printf("Has log discrepancy %d != %d",
 			rf.log[args.PrevLogIndex].Term, args.PrevLogTerm)
-		rf.log = rf.log[:args.PrevLogIndex]
-
-		fallthrough
 	default:
 		reply.Success = true
-		rf.resetElectionTimeout()
-		rf.log = append(rf.log, args.Entries...)
+		rf.leaderElection.ResetTicker()
+
+		if len(args.Entries) != 0 {
+			for i := range args.Entries {
+				if args.PrevLogIndex+(i+1) > len(rf.log)-1 {
+					break
+				}
+				if rf.log[args.PrevLogIndex+(i+1)].Term != args.Entries[i].Term {
+					rf.log = rf.log[:args.PrevLogIndex+(i+1)]
+					break
+				}
+			}
+
+			rf.log = append(
+				rf.log, args.Entries[len(rf.log)-1-args.PrevLogIndex:]...)
+		}
 
 		if args.LeaderCommit > rf.commitIndex() {
 			log.Printf("Incoming CommitIndex is higher %d > %d",
@@ -272,8 +274,8 @@ func (rf *Raft) AppendEntries(
 			min := args.LeaderCommit
 
 			if len(args.Entries) != 0 &&
-				args.LeaderCommit > uint64(len(rf.log)-1) {
-				min = uint64(len(rf.log) - 1)
+				args.LeaderCommit > len(rf.log)-1 {
+				min = len(rf.log) - 1
 			}
 
 			rf.setCommitIndex(min)
@@ -317,7 +319,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	args := &AppendEntriesArgs{
 		Term:         rf.currentTerm,
 		LeaderID:     rf.me,
-		PrevLogIndex: uint64(len(rf.log) - 1),
+		PrevLogIndex: len(rf.log) - 1,
 		PrevLogTerm:  rf.log[len(rf.log)-1].Term,
 		LeaderCommit: rf.commitIndex(),
 		Entries:      []LogEntry{le},
@@ -367,7 +369,18 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			log.Printf("AppendEntires reply from %d", peerID)
 
 			rf.mu.Lock()
-			rf.processIncomingTerm(log, peerID, reply.Term)
+			if args.Term < rf.currentTerm {
+				log.Printf("RequestVote reply from the previous term %d < %d",
+					args.Term, rf.currentTerm)
+
+				return
+			}
+
+			if ok := rf.processIncomingTerm(log, peerID, reply.Term); !ok {
+				cancel()
+
+				return
+			}
 			rf.mu.Unlock()
 
 			select {
@@ -398,7 +411,6 @@ func (rf *Raft) Kill() {
 	log.Printf("Received the KILL signal")
 
 	rf.heartbeats.StopSending()
-	rf.stopLeaderElection()
 	rf.cancel()
 }
 
@@ -408,48 +420,20 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
-func (rf *Raft) sendHeartbeats() {
-	log := extendLoggerWithPrefix(rf.logger, heartbeatingLogTopic)
-
-	rf.mu.Lock()
-	args := &AppendEntriesArgs{
-		Term:         rf.currentTerm,
-		LeaderID:     rf.me,
-		PrevLogIndex: uint64(len(rf.log) - 1),
-		PrevLogTerm:  rf.log[len(rf.log)-1].Term,
-		LeaderCommit: rf.commitIndex(),
-	}
-	rf.mu.Unlock()
-
-	for i := range rf.peers {
-		if i == rf.me {
-			continue
-		}
-
-		go func(i int) {
-			reply := &AppendEntriesReply{}
-
-			if ok := rf.sendAppendEntries(i, args.DeepCopy(), reply); !ok {
-				log.Printf("WRN fail AppendEntries call to %d peer", i)
-			}
-
-			rf.mu.Lock()
-			rf.processIncomingTerm(log, i, reply.Term)
-			rf.mu.Unlock()
-		}(i)
-	}
-}
-
-func (rf *Raft) processIncomingTerm(log *log.Logger, peerID int, term int) {
+func (rf *Raft) processIncomingTerm(log *log.Logger, peerID int, term int) bool {
 	if term > rf.currentTerm {
 		log.Printf("S%d has a higher term %d > %d", peerID, term, rf.currentTerm)
 
 		rf.heartbeats.StopSending()
-		rf.stopLeaderElection()
+		rf.leaderElection.stopLeaderElection()
 
 		rf.votedFor = -1
 		rf.currentTerm = term
+
+		return false
 	}
+
+	return true
 }
 
 // the service or tester wants to create a Raft server. the ports
@@ -464,14 +448,17 @@ func (rf *Raft) processIncomingTerm(log *log.Logger, peerID int, term int) {
 func Make(
 	peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg,
 ) *Raft {
-	rf := &Raft{}
-	rf.peers = peers
-	rf.persister = persister
-	rf.me = me
+	rf := &Raft{
+		peers:     peers,
+		persister: persister,
+		me:        me,
+		votedFor:  -1,
+		applyCh:   applyCh,
+		log:       []LogEntry{{0, ""}}, // need for first log index will be 1
+	}
 
 	// Your initialization code here (2A, 2B, 2C).
 	rf.ctx, rf.cancel = context.WithCancel(context.Background())
-	rf.resetElectionTimeoutCh = make(chan struct{})
 
 	rf.logger = log.New(
 		os.Stdout,
@@ -482,16 +469,14 @@ func Make(
 	rf.heartbeats = initHeartbeatsEngine(
 		rf.logger, broadcastTime, rf.sendHeartbeats,
 	)
-	rf.votedFor = -1
-	rf.log = []LogEntry{{0, ""}} // need for first log index will be 1
-
-	rf.applyCh = applyCh
+	rf.leaderElection = initLeaderElectionEngine(
+		rf.logger, rf.startLeaderElection,
+	)
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
 	// start ticker goroutine to start elections
-	go rf.ticker()
 	rf.applyLog()
 
 	return rf

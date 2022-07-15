@@ -76,7 +76,7 @@ type AppendEntriesArgs struct {
 	LeaderID int
 
 	// index of log entry immediately preceding new ones
-	PrevLogIndex uint64
+	PrevLogIndex int
 
 	// term of prevLogIndex entry
 	PrevLogTerm int
@@ -86,7 +86,7 @@ type AppendEntriesArgs struct {
 	Entries []LogEntry
 
 	// leader’s commitIndex
-	LeaderCommit uint64
+	LeaderCommit int
 }
 
 func (a *AppendEntriesArgs) DeepCopy() *AppendEntriesArgs {

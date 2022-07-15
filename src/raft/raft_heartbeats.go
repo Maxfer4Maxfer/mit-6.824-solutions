@@ -8,9 +8,9 @@ import (
 )
 
 type heartbeatsEngine struct {
+	log                *log.Logger
 	run                int32 // 1 - run; 0 - stop running
 	cond               *sync.Cond
-	log                *log.Logger
 	broadcastTime      time.Duration
 	sendHeartbeatsFunc func()
 }
@@ -21,11 +21,11 @@ func initHeartbeatsEngine(
 	sendHeartbeatsFunc func(),
 ) *heartbeatsEngine {
 	hbe := &heartbeatsEngine{
+		log:                extendLoggerWithPrefix(logger, heartbeatingLogTopic),
 		run:                0,
 		cond:               sync.NewCond(&sync.Mutex{}),
 		broadcastTime:      broadcastTime,
 		sendHeartbeatsFunc: sendHeartbeatsFunc,
-		log:                extendLoggerWithPrefix(logger, heartbeatingLogTopic),
 	}
 
 	go hbe.processing()
@@ -63,12 +63,49 @@ func (hbe *heartbeatsEngine) processing() {
 	for {
 		switch {
 		case atomic.LoadInt32(&hbe.run) == 0:
-			hbe.log.Print("Waiting to start sending heartbeats")
 			hbe.cond.Wait()
 		default:
 			hbe.sendHeartbeatsFunc()
 
 			time.Sleep(broadcastTime)
 		}
+	}
+}
+
+func (rf *Raft) sendHeartbeats() {
+	log := extendLoggerWithPrefix(rf.logger, heartbeatingLogTopic)
+
+	rf.mu.Lock()
+	args := &AppendEntriesArgs{
+		Term:         rf.currentTerm,
+		LeaderID:     rf.me,
+		PrevLogIndex: len(rf.log) - 1,
+		PrevLogTerm:  rf.log[len(rf.log)-1].Term,
+		LeaderCommit: rf.commitIndex(),
+	}
+	rf.mu.Unlock()
+
+	log.Printf("Hearbeats for term %d", args.Term)
+
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+
+		go func(peerID int) {
+			reply := &AppendEntriesReply{}
+
+			log.Printf("Hearbeats to S%d (term %d)", peerID, args.Term)
+
+			if ok := rf.sendAppendEntries(peerID, args.DeepCopy(), reply); !ok {
+				log.Printf("Fail hearbeating to %d peer (term %d)",
+					peerID, args.Term)
+				return
+			}
+
+			rf.mu.Lock()
+			rf.processIncomingTerm(log, peerID, reply.Term)
+			rf.mu.Unlock()
+		}(i)
 	}
 }

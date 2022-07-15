@@ -15,6 +15,42 @@ import "math/rand"
 import "sync/atomic"
 import "sync"
 
+
+// go test -race -run 2A | tee log.txt
+// go test -race -run TestInitialElection2A | tee log.txt
+// go test -race -run TestReElection2A | tee log.txt
+// go test -race -run TestManyElections2A | tee log.txt
+
+// go test -race -run 2B | tee log.txt
+// go test -race -run TestBasicAgree2B | tee log.txt
+// go test -race -run TestRPCBytes2B | tee log.txt
+// go test -race -run TestFor2023TestFollowerFailure2B | tee log.txt
+// go test -race -run TestFor2023TestLeaderFailure2B | tee log.txt
+// go test -race -run TestFailAgree2B | tee log.txt
+// go test -race -run TestFailNoAgree2B | tee log.txt
+// go test -race -run TestConcurrentStarts2B | tee log.txt
+// go test -race -run TestRejoin2B | tee log.txt
+// go test -race -run TestBackup2B | tee log.txt
+// go test -race -run TestCount2B | tee log.txt
+
+// go test -race -run 2C | tee log.txt
+// go test -race -run TestPersist12C | tee log.txt
+// go test -race -run TestPersist22C | tee log.txt
+// go test -race -run TestPersist32C | tee log.txt
+// go test -race -run TestFigure82C | tee log.txt
+// go test -race -run TestUnreliableAgree2C | tee log.txt
+// go test -race -run TestFigure8Unreliable2C | tee log.txt
+// go test -race -run TestReliableChurn2C | tee log.txt
+// go test -race -run TestUnreliableChurn2C | tee log.txt
+
+// go test -race -run 2D | tee log.txt
+// go test -race -run TestSnapshotyiwBasic2D | tee log.txt
+// go test -race -run TestSnapshotInstall2D | tee log.txt
+// go test -race -run TestSnapshotInstallUnreliable2D | tee log.txt
+// go test -race -run TestSnapshotInstallCrash2D | tee log.txt
+// go test -race -run TestSnapshotInstallUnCrash2D | tee log.txt
+// go test -race -run TestSnapshotAllCrash2D | tee log.txt
+
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
 const RaftElectionTimeout = 1000 * time.Millisecond
@@ -60,18 +96,22 @@ func TestReElection2A(t *testing.T) {
 	leader1 := cfg.checkOneLeader()
 
 	// if the leader disconnects, a new one should be elected.
+	fmt.Printf("Test: disconnect leader S%d\n", leader1)
 	cfg.disconnect(leader1)
 	cfg.checkOneLeader()
 
 	// if the old leader rejoins, that shouldn't
 	// disturb the new leader. and the old leader
 	// should switch to follower.
+	fmt.Printf("Test: reconnect S%d\n", leader1)
 	cfg.connect(leader1)
 	leader2 := cfg.checkOneLeader()
 
 	// if there's no quorum, no new leader should
 	// be elected.
+	fmt.Printf("Test: disconnect leader S%d\n", leader2)
 	cfg.disconnect(leader2)
+	fmt.Printf("Test: disconnect S%d\n", (leader2 + 1) % servers)
 	cfg.disconnect((leader2 + 1) % servers)
 	time.Sleep(2 * RaftElectionTimeout)
 
@@ -80,10 +120,12 @@ func TestReElection2A(t *testing.T) {
 	cfg.checkNoLeader()
 
 	// if a quorum arises, it should elect a leader.
+	fmt.Printf("Test: reconnect S%d\n", (leader2 + 1) % servers)
 	cfg.connect((leader2 + 1) % servers)
 	cfg.checkOneLeader()
 
 	// re-join of last node shouldn't prevent leader from existing.
+	fmt.Printf("Test: reconnect S%d\n", leader2)
 	cfg.connect(leader2)
 	cfg.checkOneLeader()
 
@@ -184,7 +226,7 @@ func TestRPCBytes2B(t *testing.T) {
 //
 // test just failure of followers.
 //
-func For2023TestFollowerFailure2B(t *testing.T) {
+func TestFor2023TestFollowerFailure2B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
@@ -231,7 +273,7 @@ func For2023TestFollowerFailure2B(t *testing.T) {
 //
 // test just failure of leaders.
 //
-func For2023TestLeaderFailure2B(t *testing.T) {
+func TestFor2023TestLeaderFailure2B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
@@ -285,6 +327,7 @@ func TestFailAgree2B(t *testing.T) {
 
 	// disconnect one follower from the network.
 	leader := cfg.checkOneLeader()
+	fmt.Printf("Test: disconnect S%d\n", (leader + 1) % servers)
 	cfg.disconnect((leader + 1) % servers)
 
 	// the leader and remaining follower should be
@@ -296,6 +339,7 @@ func TestFailAgree2B(t *testing.T) {
 	cfg.one(105, servers-1, false)
 
 	// re-connect
+	fmt.Printf("Test: connect S%d\n", (leader + 1) % servers)
 	cfg.connect((leader + 1) % servers)
 
 	// the full set of servers should preserve
@@ -1171,7 +1215,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 	cfg.end()
 }
 
-func TestSnapshotBasic2D(t *testing.T) {
+func TestSnapshotyiwBasic2D(t *testing.T) {
 	snapcommon(t, "Test (2D): snapshots basic", false, true, false)
 }
 
