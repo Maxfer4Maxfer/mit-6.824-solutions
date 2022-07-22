@@ -1,6 +1,9 @@
 package raft
 
-import "log"
+import (
+	"log"
+	"strings"
+)
 
 type logTopic string
 
@@ -15,10 +18,21 @@ const (
 	becomeFollowerLogTopic logTopic = "BCMFL"
 )
 
-func extendLoggerWithPrefix(l *log.Logger, pr logTopic) *log.Logger {
+func extendLoggerWithPrefix(l *log.Logger, pr string, d string) *log.Logger {
 	currentPrefix := l.Prefix()
+	currentPrefix = strings.TrimSpace(currentPrefix)
+
 	out := log.New(l.Writer(), currentPrefix, l.Flags())
-	out.SetPrefix(currentPrefix + string(pr) + " ")
+
+	out.SetPrefix(currentPrefix + d + string(pr) + " ")
 
 	return out
+}
+
+func extendLoggerWithTopic(l *log.Logger, pr logTopic) *log.Logger {
+	return extendLoggerWithPrefix(l, string(pr), " ")
+}
+
+func extendLoggerWithCorrelationID(l *log.Logger, cID string) *log.Logger {
+	return extendLoggerWithPrefix(l, cID, "_")
 }

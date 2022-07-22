@@ -2,9 +2,7 @@ package raft
 
 import (
 	"context"
-	crand "crypto/rand"
 	"log"
-	"math/big"
 	"math/rand"
 	"sync"
 	"time"
@@ -24,20 +22,12 @@ func initLeaderElectionEngine(
 	leaderElectionFunc func(context.Context),
 ) *leaderElectionEngine {
 	lee := &leaderElectionEngine{
-		log:               extendLoggerWithPrefix(logger, leaderElectionLogTopic),
+		log:               extendLoggerWithTopic(logger, leaderElectionLogTopic),
 		mu:                &sync.Mutex{},
 		resetTickerCh:     make(chan struct{}),
 		stopTickerCh:      make(chan struct{}),
 		leadeElectionFunc: leaderElectionFunc,
 	}
-
-	rand.Seed(func() int64 {
-		max := big.NewInt(int64(1) << 62)
-		bigx, _ := crand.Int(crand.Reader, max)
-		x := bigx.Int64()
-
-		return x
-	}())
 
 	go lee.ticker(logger)
 
@@ -64,7 +54,7 @@ func (lee *leaderElectionEngine) stopLeaderElection() {
 // The ticker go routine starts a new election if this peer hasn't received
 // heartsbeats recently.
 func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
-	log := extendLoggerWithPrefix(logger, tickerLogTopic)
+	log := extendLoggerWithTopic(logger, tickerLogTopic)
 
 	max := int64(electionTimeoutUpperBoundary)
 	min := int64(electionTimeoutLowerBoundary)
@@ -115,9 +105,10 @@ func (rf *Raft) askForVoting(
 	peerID int, args *RequestVoteArgs, resCh chan bool,
 ) {
 	reply := &RequestVoteReply{}
-	var res bool
 
-	log.Printf("RequestVote send to S%d (term: %d)", peerID, args.Term)
+	defer wg.Done()
+
+	log.Printf("-> S%d T:%d", peerID, args.Term)
 
 	if ok := rf.sendRequestVote(peerID, args, reply); !ok {
 		log.Printf("Fail RequestVote call to S%d peer (term: %d)",
@@ -160,7 +151,13 @@ func (rf *Raft) askForVoting(
 	}
 }
 
-func (rf *Raft) prepareForVote(log *log.Logger) *RequestVoteArgs {
+func (rf *Raft) leaderElectionStart(ctx context.Context) {
+	correlationID := CorrelationID()
+	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
+	log = extendLoggerWithCorrelationID(log, correlationID)
+
+	log.Printf("Starting new Leader election cycle")
+
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -169,16 +166,17 @@ func (rf *Raft) prepareForVote(log *log.Logger) *RequestVoteArgs {
 
 	log.Printf("Become a condidate and increase term to %d", rf.currentTerm)
 
-	return &RequestVoteArgs{
-		Term:         rf.currentTerm,
-		CandidateID:  rf.me,
-		LastLogIndex: len(rf.log) - 1,
-		LastLogTerm:  rf.log[len(rf.log)-1].Term,
+	args := &RequestVoteArgs{
+		CorrelationID: correlationID,
+		Term:          rf.currentTerm,
+		CandidateID:   rf.me,
+		LastLogIndex:  len(rf.log) - 1,
+		LastLogTerm:   rf.log[len(rf.log)-1].Term,
 	}
 }
 
 func (rf *Raft) startLeaderElection(ctx context.Context) {
-	log := extendLoggerWithPrefix(rf.logger, leaderElectionLogTopic)
+	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
 
 	log.Printf("Starting new Leader election cycle")
 
@@ -250,13 +248,17 @@ func (rf *Raft) startLeaderElection(ctx context.Context) {
 func (rf *Raft) RequestVote(
 	args *RequestVoteArgs, reply *RequestVoteReply,
 ) {
-	log := extendLoggerWithPrefix(rf.logger, leaderElectionLogTopic)
+	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
+	log = extendLoggerWithCorrelationID(log, args.CorrelationID)
 
-	// Your code here (2A, 2B).
-	log.Printf("RequestVote from S%d (term: %d)", args.CandidateID, args.Term)
+	log.Printf("<- S%d {T:%d, LLI:%d, LLT:%d}",
+		args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	log.Printf("Current State: {T:%d, LLI:%d, LLT:%d}",
+		rf.currentTerm, len(rf.log)-1, rf.log[len(rf.log)-1].Term)
 
 	rf.processIncomingTerm(log, args.CandidateID, args.Term)
 
@@ -272,7 +274,8 @@ func (rf *Raft) RequestVote(
 		log.Printf("Already voted for incoming candidate %d", rf.votedFor)
 	// candidate’s log is at least as up-to-date as receiver’s log
 	case rf.log[len(rf.log)-1].Term > args.LastLogTerm:
-		log.Printf("Has more up-to-date logs %d > %d", rf.log[len(rf.log)-1].Term, args.LastLogTerm)
+		log.Printf("Has more up-to-date log term %d > %d",
+			rf.log[len(rf.log)-1].Term, args.LastLogTerm)
 	case rf.log[len(rf.log)-1].Term == args.LastLogTerm &&
 		len(rf.log)-1 > args.LastLogIndex:
 		log.Printf("Has longer log %d > %d", len(rf.log)-1, args.LastLogIndex)

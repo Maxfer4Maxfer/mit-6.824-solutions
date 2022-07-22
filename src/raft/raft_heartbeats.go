@@ -12,16 +12,16 @@ type heartbeatsEngine struct {
 	run                int32 // 1 - run; 0 - stop running
 	cond               *sync.Cond
 	broadcastTime      time.Duration
-	sendHeartbeatsFunc func()
+	sendHeartbeatsFunc func(correlationID string)
 }
 
 func initHeartbeatsEngine(
 	logger *log.Logger,
 	broadcastTime time.Duration,
-	sendHeartbeatsFunc func(),
+	sendHeartbeatsFunc func(correlationID string),
 ) *heartbeatsEngine {
 	hbe := &heartbeatsEngine{
-		log:                extendLoggerWithPrefix(logger, heartbeatingLogTopic),
+		log:                extendLoggerWithTopic(logger, heartbeatingLogTopic),
 		run:                0,
 		cond:               sync.NewCond(&sync.Mutex{}),
 		broadcastTime:      broadcastTime,
@@ -65,23 +65,26 @@ func (hbe *heartbeatsEngine) processing() {
 		case atomic.LoadInt32(&hbe.run) == 0:
 			hbe.cond.Wait()
 		default:
-			hbe.sendHeartbeatsFunc()
+			cID := CorrelationID()
+			hbe.sendHeartbeatsFunc(cID)
 
 			time.Sleep(broadcastTime)
 		}
 	}
 }
 
-func (rf *Raft) sendHeartbeats() {
-	log := extendLoggerWithPrefix(rf.logger, heartbeatingLogTopic)
+func (rf *Raft) sendHeartbeats(correlationID string) {
+	log := extendLoggerWithTopic(rf.logger, heartbeatingLogTopic)
+	log = extendLoggerWithCorrelationID(log, correlationID)
 
 	rf.mu.Lock()
 	args := &AppendEntriesArgs{
-		Term:         rf.currentTerm,
-		LeaderID:     rf.me,
-		PrevLogIndex: len(rf.log) - 1,
-		PrevLogTerm:  rf.log[len(rf.log)-1].Term,
-		LeaderCommit: rf.commitIndex(),
+		CorrelationID: correlationID,
+		Term:          rf.currentTerm,
+		LeaderID:      rf.me,
+		PrevLogIndex:  len(rf.log) - 1,
+		PrevLogTerm:   rf.log[len(rf.log)-1].Term,
+		LeaderCommit:  rf.commitIndex(),
 	}
 	rf.mu.Unlock()
 
@@ -95,7 +98,7 @@ func (rf *Raft) sendHeartbeats() {
 		go func(peerID int) {
 			reply := &AppendEntriesReply{}
 
-			log.Printf("Hearbeats to S%d (term %d) %+v", peerID, args.Term, *args)
+			log.Printf("Hearbeats to S%d (term %d)", peerID, args.Term)
 
 			if ok := rf.sendAppendEntries(peerID, args.DeepCopy(), reply); !ok {
 				log.Printf("Fail hearbeating to %d peer (term %d)",

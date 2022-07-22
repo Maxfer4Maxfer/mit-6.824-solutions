@@ -16,9 +16,12 @@ package raft
 
 import (
 	"context"
+	crand "crypto/rand"
 	"fmt"
 	"log"
 	"math"
+	"math/big"
+	"math/rand"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -132,7 +135,7 @@ func (rf *Raft) setCommitIndex(ci int) {
 }
 
 func (rf *Raft) applyLog() {
-	log := extendLoggerWithPrefix(rf.logger, applyLogTopic)
+	log := extendLoggerWithTopic(rf.logger, applyLogTopic)
 
 	rf.commitIndexCond = sync.NewCond(&sync.Mutex{})
 
@@ -234,12 +237,14 @@ func (rf *Raft) AppendEntries(
 	var log *log.Logger
 
 	if len(args.Entries) == 0 {
-		log = extendLoggerWithPrefix(rf.logger, heartbeatingLogTopic)
+		log = extendLoggerWithTopic(rf.logger, heartbeatingLogTopic)
 	} else {
-		log = extendLoggerWithPrefix(rf.logger, appendEntriesLogTopic)
+		log = extendLoggerWithTopic(rf.logger, appendEntriesLogTopic)
 	}
 
-	log.Printf("AppendEntries from S%d", args.LeaderID)
+	log = extendLoggerWithCorrelationID(log, args.CorrelationID)
+
+	log.Printf("AppendEntries from S%d with %d entries", args.LeaderID, len(args.Entries))
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -273,11 +278,15 @@ func (rf *Raft) AppendEntries(
 					break
 				}
 				if rf.log[args.PrevLogIndex+(i+1)].Term != args.Entries[i].Term {
+					log.Printf("ApplyEntries shrink local log [:%d] len(rf.log): %d",
+						args.PrevLogIndex+(i+1), len(rf.log))
 					rf.log = rf.log[:args.PrevLogIndex+(i+1)]
 					break
 				}
 			}
 
+			log.Printf("ApplyEntries append [%d:] from len(args.Entries): %d ",
+				len(rf.log)-1-args.PrevLogIndex, len(args.Entries))
 			rf.log = append(
 				rf.log, args.Entries[len(rf.log)-1-args.PrevLogIndex:]...)
 		}
@@ -312,7 +321,7 @@ func (rf *Raft) AppendEntries(
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
-	log := extendLoggerWithPrefix(rf.logger, startLogTopic)
+	log := extendLoggerWithTopic(rf.logger, startLogTopic)
 
 	log.Printf("Start call %v", command)
 
@@ -377,6 +386,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 				rf.mu.Lock()
 				log.Printf("nextIndex: %d index+1: %d", rf.nextIndex[peerID], index+1)
 				fp := rf.log[rf.nextIndex[peerID] : index+1]
+				args.CorrelationID = CorrelationID()
 				args.Entries = append([]LogEntry(nil), fp...)
 				args.PrevLogIndex = rf.nextIndex[peerID] - 1
 				args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
@@ -451,7 +461,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
-	extendLoggerWithPrefix(rf.logger, commonLogTopic)
+	extendLoggerWithTopic(rf.logger, commonLogTopic)
 	log.Printf("Received the KILL signal")
 
 	rf.heartbeats.StopSending()
@@ -492,6 +502,14 @@ func (rf *Raft) processIncomingTerm(log *log.Logger, peerID int, term int) bool 
 func Make(
 	peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg,
 ) *Raft {
+	rand.Seed(func() int64 {
+		max := big.NewInt(int64(1) << 62)
+		bigx, _ := crand.Int(crand.Reader, max)
+		x := bigx.Int64()
+
+		return x
+	}())
+
 	rf := &Raft{
 		peers:      peers,
 		persister:  persister,

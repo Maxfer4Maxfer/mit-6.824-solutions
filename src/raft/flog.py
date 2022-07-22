@@ -53,10 +53,10 @@ def main(
     topics = list(TOPICS)
 
     # debug
-    # file = open(
-    #     "/Users/maxim/go/src/github.com/Maxfer4Maxfer/mit-6.824/src/raft/log.txt",
-    # )
-    # n_columns = 3
+    file = open(
+        "/Users/maxim/go/src/github.com/Maxfer4Maxfer/mit-6.824/src/raft/log.txt",
+    )
+    n_columns = 5
 
     # We can take input from a stdin (pipes) or from a file
     input_ = file if file else sys.stdin
@@ -87,7 +87,10 @@ def main(
                 continue
 
             # S5 ELECT 18:19:20.292541 raft.go:360: 6 peer voted against us
-            peer, topic, time, code_line, *msg = line.strip().split(" ")
+            peer, topic_cID, time, code_line, *msg = line.strip().split(" ")
+
+            # check that topic may has correlationID
+            topic, *correlationID = topic_cID.strip().split("_")
 
             # time, topic, *msg = line.strip().split(" ")
             # To ignore some topics
@@ -95,6 +98,9 @@ def main(
                 continue
 
             msg = " ".join(msg)
+
+            if len(correlationID) == 1: 
+                msg = "[" + correlationID[0] + "] " + msg
 
             # Colorize output by using rich syntax when needed
             if colorize and topic in topics:

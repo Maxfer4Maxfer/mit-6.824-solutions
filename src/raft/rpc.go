@@ -5,19 +5,29 @@ package raft
 // field names must start with capital letters!
 //
 type RequestVoteArgs struct {
-	// Your data here (2A, 2B).
-	Term         int // candidate’s term
-	CandidateID  int // candidate requesting vote
-	LastLogIndex int // index of candidate’s last log entry
-	LastLogTerm  int // term of candidate’s last log entry
+	// CorrelationsID is used to trace requests across multiple raft instance.
+	CorrelationID string
+
+	// candidate’s term
+	Term int
+
+	// candidate requesting vote
+	CandidateID int
+
+	// index of candidate’s last log entry
+	LastLogIndex int
+
+	// term of candidate’s last log entry
+	LastLogTerm int
 }
 
 func (r *RequestVoteArgs) DeepCopy() *RequestVoteArgs {
 	return &RequestVoteArgs{
-		Term:         r.Term,
-		CandidateID:  r.CandidateID,
-		LastLogIndex: r.LastLogIndex,
-		LastLogTerm:  r.LastLogTerm,
+		CorrelationID: r.CorrelationID,
+		Term:          r.Term,
+		CandidateID:   r.CandidateID,
+		LastLogIndex:  r.LastLogIndex,
+		LastLogTerm:   r.LastLogTerm,
 	}
 }
 
@@ -69,6 +79,9 @@ func (rf *Raft) sendRequestVote(
 }
 
 type AppendEntriesArgs struct {
+	// CorrelationsID is used to trace requests across multiple raft instance.
+	CorrelationID string
+
 	// leader’s term
 	Term int
 
@@ -99,12 +112,13 @@ func (a *AppendEntriesArgs) DeepCopy() *AppendEntriesArgs {
 	}
 
 	return &AppendEntriesArgs{
-		Term:         a.Term,
-		LeaderID:     a.LeaderID,
-		PrevLogIndex: a.PrevLogIndex,
-		PrevLogTerm:  a.PrevLogTerm,
-		Entries:      entries,
-		LeaderCommit: a.LeaderCommit,
+		CorrelationID: a.CorrelationID,
+		Term:          a.Term,
+		LeaderID:      a.LeaderID,
+		PrevLogIndex:  a.PrevLogIndex,
+		PrevLogTerm:   a.PrevLogTerm,
+		Entries:       entries,
+		LeaderCommit:  a.LeaderCommit,
 	}
 }
 
