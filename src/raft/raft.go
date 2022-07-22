@@ -110,6 +110,14 @@ type Raft struct {
 	// index of highest log entry applied to state machine
 	// initialized to 0, intcreases monotonically
 	lastApplied int
+
+	// for each server, index of the next log entry to send to that server
+	// (initialized to leader last log index + 1)
+	nextIndex []int
+
+	// index of highest log entry applied to state machine
+	// (initialized to 0, increases monotonically)
+	matchIndex []int
 }
 
 func (rf *Raft) commitIndex() int {
@@ -136,7 +144,8 @@ func (rf *Raft) applyLog() {
 
 			rf.mu.Lock()
 			for i := rf.lastApplied + 1; i <= rf.commitIndex(); i++ {
-				log.Printf("Apply index: %d, term: %d", i, rf.log[i].Term)
+				log.Printf("Apply index: %d, term: %d, command %v",
+					i, rf.log[i].Term, rf.log[i].Command)
 				rf.lastApplied++
 				rf.applyCh <- ApplyMsg{
 					Command:      rf.log[i].Command,
@@ -237,21 +246,27 @@ func (rf *Raft) AppendEntries(
 
 	rf.processIncomingTerm(log, args.LeaderID, args.Term)
 
-	reply.Success = false
 	reply.Term = rf.currentTerm
 
 	switch {
 	case args.Term < rf.currentTerm:
 		log.Printf("Incoming term smaller %d < %d", args.Term, rf.currentTerm)
+		reply.Success = false
 	case len(rf.log)-1 < args.PrevLogIndex:
-		log.Printf("Has smaller log size %d != %d", len(rf.log)-1, args.PrevLogIndex)
+		log.Printf("Has smaller log size %d < %d",
+			len(rf.log)-1, args.PrevLogIndex)
+		reply.Success = false
+		rf.leaderElection.ResetTicker()
 	case rf.log[args.PrevLogIndex].Term != args.PrevLogTerm:
 		log.Printf("Has log discrepancy %d != %d",
 			rf.log[args.PrevLogIndex].Term, args.PrevLogTerm)
+		reply.Success = false
+		rf.leaderElection.ResetTicker()
 	default:
 		reply.Success = true
 		rf.leaderElection.ResetTicker()
 
+		// shrink local log
 		if len(args.Entries) != 0 {
 			for i := range args.Entries {
 				if args.PrevLogIndex+(i+1) > len(rf.log)-1 {
@@ -319,17 +334,15 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	args := &AppendEntriesArgs{
 		Term:         rf.currentTerm,
 		LeaderID:     rf.me,
-		PrevLogIndex: len(rf.log) - 1,
-		PrevLogTerm:  rf.log[len(rf.log)-1].Term,
 		LeaderCommit: rf.commitIndex(),
-		Entries:      []LogEntry{le},
 	}
 
 	rf.log = append(rf.log, le)
-
+	index := len(rf.log) - 1
 	rf.mu.Unlock()
 
 	log.Printf("append a local log")
+	log.Printf("append to index: %d", index)
 
 	go func() {
 		for _ = range doneCh {
@@ -339,7 +352,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			if cAnswers == math.Ceil(float64(len(rf.peers))/2) {
 				log.Printf("increasing comminIndex")
 
-				rf.setCommitIndex(args.PrevLogIndex + 1)
+				rf.setCommitIndex(index)
 
 				cancel()
 			}
@@ -351,37 +364,68 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			continue
 		}
 
-		go func(peerID int) {
+		args := args.DeepCopy()
+
+		go func(peerID int, args *AppendEntriesArgs) {
 			reply := &AppendEntriesReply{}
 
-			log.Printf("AppendEntires sent to %d", peerID)
-
 			for {
-				if ok := rf.sendAppendEntries(peerID, args.DeepCopy(), reply); !ok {
+				if !rf.heartbeats.IsSendingInProgress() {
+					return
+				}
+
+				rf.mu.Lock()
+				log.Printf("nextIndex: %d index+1: %d", rf.nextIndex[peerID], index+1)
+				fp := rf.log[rf.nextIndex[peerID] : index+1]
+				args.Entries = append([]LogEntry(nil), fp...)
+				args.PrevLogIndex = rf.nextIndex[peerID] - 1
+				args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
+				rf.mu.Unlock()
+
+				log.Printf("Send to S%d {Term:%d PrevLogIndex:%d "+
+					"PrevLogTerm:%d len(Entries):%d LeaderCommit:%d}",
+					peerID, args.Term, args.PrevLogIndex, args.PrevLogTerm,
+					len(args.Entries), args.LeaderCommit)
+
+				if ok := rf.sendAppendEntries(peerID, args, reply); !ok {
 					log.Printf("WRN fail AppendEntries call to %d peer", peerID)
 
 					continue
 				}
 
+				log.Printf("AppendEntires reply from %d", peerID)
+
+				rf.mu.Lock()
+				if args.Term < rf.currentTerm {
+					log.Printf("ApplyEntries reply from the previous term %d < %d",
+						args.Term, rf.currentTerm)
+					cancel()
+					rf.mu.Unlock()
+
+					return
+				}
+
+				if ok := rf.processIncomingTerm(log, peerID, reply.Term); !ok {
+					cancel()
+					rf.mu.Unlock()
+
+					return
+				}
+
+				if reply.Success {
+					if rf.nextIndex[peerID] < index+1 {
+						rf.nextIndex[peerID] = index + 1
+					}
+				} else {
+					rf.nextIndex[peerID]--
+					rf.mu.Unlock()
+
+					continue
+				}
+				rf.mu.Unlock()
+
 				break
 			}
-
-			log.Printf("AppendEntires reply from %d", peerID)
-
-			rf.mu.Lock()
-			if args.Term < rf.currentTerm {
-				log.Printf("RequestVote reply from the previous term %d < %d",
-					args.Term, rf.currentTerm)
-
-				return
-			}
-
-			if ok := rf.processIncomingTerm(log, peerID, reply.Term); !ok {
-				cancel()
-
-				return
-			}
-			rf.mu.Unlock()
 
 			select {
 			case <-ctx.Done():
@@ -389,10 +433,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			default:
 				doneCh <- peerID
 			}
-		}(i)
+		}(i, args)
 	}
 
-	return int(args.PrevLogIndex + 1), args.Term, true
+	return index, args.Term, true
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -449,12 +493,14 @@ func Make(
 	peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg,
 ) *Raft {
 	rf := &Raft{
-		peers:     peers,
-		persister: persister,
-		me:        me,
-		votedFor:  -1,
-		applyCh:   applyCh,
-		log:       []LogEntry{{0, ""}}, // need for first log index will be 1
+		peers:      peers,
+		persister:  persister,
+		me:         me,
+		votedFor:   -1,
+		applyCh:    applyCh,
+		log:        []LogEntry{{0, ""}}, // need for first log index will be 1
+		nextIndex:  make([]int, len(peers)),
+		matchIndex: make([]int, len(peers)),
 	}
 
 	// Your initialization code here (2A, 2B, 2C).

@@ -95,7 +95,7 @@ func (rf *Raft) sendHeartbeats() {
 		go func(peerID int) {
 			reply := &AppendEntriesReply{}
 
-			log.Printf("Hearbeats to S%d (term %d)", peerID, args.Term)
+			log.Printf("Hearbeats to S%d (term %d) %+v", peerID, args.Term, *args)
 
 			if ok := rf.sendAppendEntries(peerID, args.DeepCopy(), reply); !ok {
 				log.Printf("Fail hearbeating to %d peer (term %d)",
@@ -106,6 +106,12 @@ func (rf *Raft) sendHeartbeats() {
 			rf.mu.Lock()
 			rf.processIncomingTerm(log, peerID, reply.Term)
 			rf.mu.Unlock()
+
+			// rf.mu.Lock()
+			// if !reply.Success {
+			// 	rf.nextIndex[peerID]--
+			// }
+			// rf.mu.Unlock()
 		}(i)
 	}
 }

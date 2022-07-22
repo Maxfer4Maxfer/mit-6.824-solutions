@@ -218,8 +218,19 @@ func (rf *Raft) startLeaderElection(ctx context.Context) {
 			if nVotedFor > len(rf.peers)/2 || nVoted == len(rf.peers) {
 				if nVotedFor > len(rf.peers)/2 {
 					log.Printf("I am a new leader for term %d", args.Term)
+
+					rf.mu.Lock()
+					nextIndex := len(rf.log)
+
+					for i := range rf.nextIndex {
+						log.Printf("Set nextIndex for S%d to %d", i, nextIndex)
+						rf.nextIndex[i] = nextIndex
+					}
+					rf.mu.Unlock()
+
 					rf.heartbeats.StartSending()
 					rf.leaderElection.StopTicker()
+
 				} else {
 					log.Print("Not luck, going to try the next time")
 					// rf.mu.Lock()
