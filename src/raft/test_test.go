@@ -419,6 +419,7 @@ func TestConcurrentStarts2B(t *testing.T) {
 	var success bool
 loop:
 	for try := 0; try < 5; try++ {
+		fmt.Printf("Test: %d try\n", try+1)
 		if try > 0 {
 			// give solution some time to settle
 			time.Sleep(3 * time.Second)
@@ -430,6 +431,8 @@ loop:
 			// leader moved on really quickly
 			continue
 		}
+
+		fmt.Printf("Test: S%d is a leader\n", leader)
 
 		iters := 5
 		var wg sync.WaitGroup
@@ -455,6 +458,7 @@ loop:
 		for j := 0; j < servers; j++ {
 			if t, _ := cfg.rafts[j].GetState(); t != term {
 				// term changed -- can't expect low RPC counts
+				fmt.Printf("Test: Term changed %d != %d\n", t, term)
 				continue loop
 			}
 		}

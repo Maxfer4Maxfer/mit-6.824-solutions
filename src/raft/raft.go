@@ -134,7 +134,7 @@ func (rf *Raft) setCommitIndex(ci int) {
 	}
 }
 
-func (rf *Raft) applyLog() {
+func (rf *Raft) applyLogProcessing() {
 	log := extendLoggerWithTopic(rf.logger, applyLogTopic)
 
 	rf.commitIndexCond = sync.NewCond(&sync.Mutex{})
@@ -244,7 +244,7 @@ func (rf *Raft) AppendEntries(
 
 	log = extendLoggerWithCorrelationID(log, args.CorrelationID)
 
-	log.Printf("AppendEntries from S%d with %d entries", args.LeaderID, len(args.Entries))
+	log.Printf("AppendEntries from S%d %+v", args.LeaderID, args)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -272,23 +272,32 @@ func (rf *Raft) AppendEntries(
 		rf.leaderElection.ResetTicker()
 
 		// shrink local log
+		index := 0
 		if len(args.Entries) != 0 {
+			add := false
 			for i := range args.Entries {
 				if args.PrevLogIndex+(i+1) > len(rf.log)-1 {
+					index = i
+					add = true
+					log.Printf("choose take entries from %d", index)
 					break
 				}
 				if rf.log[args.PrevLogIndex+(i+1)].Term != args.Entries[i].Term {
-					log.Printf("ApplyEntries shrink local log [:%d] len(rf.log): %d",
+					log.Printf("shrink local log [:%d] len(rf.log): %d",
 						args.PrevLogIndex+(i+1), len(rf.log))
 					rf.log = rf.log[:args.PrevLogIndex+(i+1)]
+					add = true
 					break
 				}
 			}
 
-			log.Printf("ApplyEntries append [%d:] from len(args.Entries): %d ",
-				len(rf.log)-1-args.PrevLogIndex, len(args.Entries))
-			rf.log = append(
-				rf.log, args.Entries[len(rf.log)-1-args.PrevLogIndex:]...)
+			if add {
+				log.Printf("append [%d:]", index)
+				rf.log = append(rf.log, args.Entries[index:]...)
+			} else {
+				log.Printf("no new entries")
+			}
+
 		}
 
 		if args.LeaderCommit > rf.commitIndex() {
@@ -322,6 +331,9 @@ func (rf *Raft) AppendEntries(
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
 	log := extendLoggerWithTopic(rf.logger, startLogTopic)
+
+	correlationID := CorrelationID()
+	log = extendLoggerWithCorrelationID(log, correlationID)
 
 	log.Printf("Start call %v", command)
 
@@ -373,8 +385,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			continue
 		}
 
-		args := args.DeepCopy()
-
 		go func(peerID int, args *AppendEntriesArgs) {
 			reply := &AppendEntriesReply{}
 
@@ -384,9 +394,18 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 				}
 
 				rf.mu.Lock()
-				log.Printf("nextIndex: %d index+1: %d", rf.nextIndex[peerID], index+1)
+
+				if rf.nextIndex[peerID] > index+1 {
+					log.Printf("S%d already updated by someoune else", peerID)
+					rf.mu.Unlock()
+
+					return
+				}
+
+				log.Printf("nextIndex: %d index+1: %d",
+					rf.nextIndex[peerID], index+1)
 				fp := rf.log[rf.nextIndex[peerID] : index+1]
-				args.CorrelationID = CorrelationID()
+				args.CorrelationID = correlationID
 				args.Entries = append([]LogEntry(nil), fp...)
 				args.PrevLogIndex = rf.nextIndex[peerID] - 1
 				args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
@@ -443,7 +462,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			default:
 				doneCh <- peerID
 			}
-		}(i, args)
+		}(i, args.DeepCopy())
 	}
 
 	return index, args.Term, true
@@ -540,8 +559,7 @@ func Make(
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	// start ticker goroutine to start elections
-	rf.applyLog()
+	rf.applyLogProcessing()
 
 	return rf
 }
