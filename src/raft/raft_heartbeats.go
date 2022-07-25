@@ -48,11 +48,7 @@ func (hbe *heartbeatsEngine) StopSending() {
 }
 
 func (hbe *heartbeatsEngine) IsSendingInProgress() bool {
-	if atomic.LoadInt32(&hbe.run) == 1 {
-		return true
-	}
-
-	return false
+	return atomic.LoadInt32(&hbe.run) == 1
 }
 
 func (hbe *heartbeatsEngine) processing() {
@@ -65,8 +61,7 @@ func (hbe *heartbeatsEngine) processing() {
 		case atomic.LoadInt32(&hbe.run) == 0:
 			hbe.cond.Wait()
 		default:
-			cID := CorrelationID()
-			hbe.sendHeartbeatsFunc(cID)
+			hbe.sendHeartbeatsFunc(CorrelationID())
 
 			time.Sleep(broadcastTime)
 		}
@@ -103,18 +98,13 @@ func (rf *Raft) sendHeartbeats(correlationID string) {
 			if ok := rf.sendAppendEntries(peerID, args.DeepCopy(), reply); !ok {
 				log.Printf("Fail hearbeating to %d peer (term %d)",
 					peerID, args.Term)
+
 				return
 			}
 
 			rf.mu.Lock()
 			rf.processIncomingTerm(log, peerID, reply.Term)
 			rf.mu.Unlock()
-
-			// rf.mu.Lock()
-			// if !reply.Success {
-			// 	rf.nextIndex[peerID]--
-			// }
-			// rf.mu.Unlock()
 		}(i)
 	}
 }

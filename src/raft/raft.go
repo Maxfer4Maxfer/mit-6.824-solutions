@@ -16,11 +16,8 @@ package raft
 
 import (
 	"context"
-	crand "crypto/rand"
 	"fmt"
 	"log"
-	"math"
-	"math/big"
 	"math/rand"
 	"os"
 	"sync"
@@ -79,8 +76,6 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
-	cancel    context.CancelFunc  // set by Kill()
-	ctx       context.Context     // for liveness check
 
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
@@ -153,7 +148,7 @@ func (rf *Raft) applyLogProcessing() {
 				rf.applyCh <- ApplyMsg{
 					Command:      rf.log[i].Command,
 					CommandValid: true,
-					CommandIndex: int(rf.lastApplied),
+					CommandIndex: rf.lastApplied,
 				}
 			}
 			rf.mu.Unlock()
@@ -256,37 +251,49 @@ func (rf *Raft) AppendEntries(
 	switch {
 	case args.Term < rf.currentTerm:
 		log.Printf("Incoming term smaller %d < %d", args.Term, rf.currentTerm)
+
 		reply.Success = false
 	case len(rf.log)-1 < args.PrevLogIndex:
-		log.Printf("Has smaller log size %d < %d",
-			len(rf.log)-1, args.PrevLogIndex)
+		log.Printf("Smaller log size %d < %d", len(rf.log)-1, args.PrevLogIndex)
+
 		reply.Success = false
+
 		rf.leaderElection.ResetTicker()
 	case rf.log[args.PrevLogIndex].Term != args.PrevLogTerm:
-		log.Printf("Has log discrepancy %d != %d",
+		log.Printf("Log discrepancy %d != %d",
 			rf.log[args.PrevLogIndex].Term, args.PrevLogTerm)
+
 		reply.Success = false
+
 		rf.leaderElection.ResetTicker()
 	default:
 		reply.Success = true
+
 		rf.leaderElection.ResetTicker()
 
 		// shrink local log
 		index := 0
+
 		if len(args.Entries) != 0 {
 			add := false
+
 			for i := range args.Entries {
 				if args.PrevLogIndex+(i+1) > len(rf.log)-1 {
 					index = i
 					add = true
+
 					log.Printf("choose take entries from %d", index)
+
 					break
 				}
+
 				if rf.log[args.PrevLogIndex+(i+1)].Term != args.Entries[i].Term {
 					log.Printf("shrink local log [:%d] len(rf.log): %d",
 						args.PrevLogIndex+(i+1), len(rf.log))
+
 					rf.log = rf.log[:args.PrevLogIndex+(i+1)]
 					add = true
+
 					break
 				}
 			}
@@ -297,7 +304,6 @@ func (rf *Raft) AppendEntries(
 			} else {
 				log.Printf("no new entries")
 			}
-
 		}
 
 		if args.LeaderCommit > rf.commitIndex() {
@@ -339,14 +345,17 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	if !rf.heartbeats.IsSendingInProgress() {
 		log.Printf("Not a leader")
+
 		rf.mu.Lock()
-		defer rf.mu.Unlock()
-		return -1, rf.currentTerm, false
+		ct := rf.currentTerm
+		rf.mu.Unlock()
+
+		return -1, ct, false
 	}
 
 	var (
 		doneCh      = make(chan int)
-		cAnswers    = float64(1) // already count itself
+		cAnswers    = 1 // already count itself
 		le          = LogEntry{rf.currentTerm, command}
 		ctx, cancel = context.WithCancel(context.Background())
 	)
@@ -366,11 +375,11 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	log.Printf("append to index: %d", index)
 
 	go func() {
-		for _ = range doneCh {
+		for range doneCh {
 			cAnswers++
-			log.Printf("(%.0f/%d) answers", cAnswers, len(rf.peers))
+			log.Printf("(%d/%d) answers", cAnswers, len(rf.peers))
 
-			if cAnswers == math.Ceil(float64(len(rf.peers))/2) {
+			if cAnswers == len(rf.peers)/2+1 {
 				log.Printf("increasing comminIndex")
 
 				rf.setCommitIndex(index)
@@ -404,11 +413,15 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 				log.Printf("nextIndex: %d index+1: %d",
 					rf.nextIndex[peerID], index+1)
-				fp := rf.log[rf.nextIndex[peerID] : index+1]
+
 				args.CorrelationID = correlationID
+
+				fp := rf.log[rf.nextIndex[peerID] : index+1]
 				args.Entries = append([]LogEntry(nil), fp...)
+
 				args.PrevLogIndex = rf.nextIndex[peerID] - 1
 				args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
+
 				rf.mu.Unlock()
 
 				log.Printf("Send to S%d {Term:%d PrevLogIndex:%d "+
@@ -484,7 +497,6 @@ func (rf *Raft) Kill() {
 	log.Printf("Received the KILL signal")
 
 	rf.heartbeats.StopSending()
-	rf.cancel()
 }
 
 func (rf *Raft) killed() bool {
@@ -521,13 +533,7 @@ func (rf *Raft) processIncomingTerm(log *log.Logger, peerID int, term int) bool 
 func Make(
 	peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg,
 ) *Raft {
-	rand.Seed(func() int64 {
-		max := big.NewInt(int64(1) << 62)
-		bigx, _ := crand.Int(crand.Reader, max)
-		x := bigx.Int64()
-
-		return x
-	}())
+	rand.Seed(MakeSeed())
 
 	rf := &Raft{
 		peers:      peers,
@@ -541,8 +547,6 @@ func Make(
 	}
 
 	// Your initialization code here (2A, 2B, 2C).
-	rf.ctx, rf.cancel = context.WithCancel(context.Background())
-
 	rf.logger = log.New(
 		os.Stdout,
 		fmt.Sprintf("S%d ", me),

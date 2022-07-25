@@ -15,7 +15,6 @@ const (
 	heartbeatingLogTopic   logTopic = "HRTBT"
 	startLogTopic          logTopic = "START"
 	appendEntriesLogTopic  logTopic = "APPND"
-	becomeFollowerLogTopic logTopic = "BCMFL"
 )
 
 func extendLoggerWithPrefix(l *log.Logger, pr string, d string) *log.Logger {
@@ -24,7 +23,7 @@ func extendLoggerWithPrefix(l *log.Logger, pr string, d string) *log.Logger {
 
 	out := log.New(l.Writer(), currentPrefix, l.Flags())
 
-	out.SetPrefix(currentPrefix + d + string(pr) + " ")
+	out.SetPrefix(currentPrefix + d + pr + " ")
 
 	return out
 }

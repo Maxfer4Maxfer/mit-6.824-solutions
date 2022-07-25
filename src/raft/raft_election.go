@@ -64,7 +64,7 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 	ticker := time.NewTicker(et)
 
 	go func() {
-		for _ = range ticker.C {
+		for range ticker.C {
 			log.Printf("Did not see a leader to much")
 
 			lee.stopLeaderElection()
@@ -78,15 +78,11 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 			go lee.leadeElectionFunc(ctx)
 
 			electionTimeoutCh <- time.Duration(rand.Int63n(max-min) + min)
-
 		}
 	}()
 
 	for {
 		select {
-		// case <-rf.ctx.Done():
-		// 	log.Printf("Exit leader election routin")
-		// 	return
 		case <-lee.stopTickerCh:
 			ticker.Stop()
 			log.Printf("Stop the election ticker")
@@ -102,7 +98,7 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 
 func (rf *Raft) askForVoting(
 	ctx context.Context, log *log.Logger,
-	peerID int, args *RequestVoteArgs, resCh chan bool,
+	peerID int, args *RequestVoteArgs, resCh chan int,
 ) {
 	reply := &RequestVoteReply{}
 
@@ -125,6 +121,7 @@ func (rf *Raft) askForVoting(
 			args.Term, rf.currentTerm)
 
 		rf.mu.Unlock()
+
 		return
 	}
 
@@ -140,11 +137,11 @@ func (rf *Raft) askForVoting(
 		if ok && reply.VoteGranted {
 			log.Printf("Win: S%d voted for us", peerID)
 
-			res = true
+			res = 1
 		} else {
 			log.Printf("Loose: S%d voted against us", peerID)
 
-			res = false
+			res = 0
 		}
 
 		resCh <- res
@@ -181,9 +178,9 @@ func (rf *Raft) startLeaderElection(ctx context.Context) {
 	log.Printf("Starting new Leader election cycle")
 
 	args := rf.prepareForVote(log)
-	nVoted := 1              // already voted for themselves
-	nVotedFor := 1           // already voted for themselves
-	resCh := make(chan bool) // true - votedFor; false - votedAgeinst
+	nVoted := 1             // already voted for themselves
+	nVotedFor := 1          // already voted for themselves
+	resCh := make(chan int) // 0 - votedFor; 1 - votedAgeinst
 
 	for i := range rf.peers {
 		if i == rf.me {
@@ -197,18 +194,11 @@ func (rf *Raft) startLeaderElection(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			log.Printf("Stop election for term %d", args.Term)
-			// rf.mu.Lock()
-			// if rf.currentTerm == args.Term {
-			// 	rf.currentTerm--
-			// }
-			// rf.mu.Unlock()
+
 			return
 		case res := <-resCh:
+			nVotedFor += res
 			nVoted++
-
-			if res {
-				nVotedFor++
-			}
 
 			log.Printf("(%d/%d) voted, %d for, %d against",
 				nVoted, len(rf.peers), nVotedFor, nVoted-nVotedFor)
@@ -228,15 +218,8 @@ func (rf *Raft) startLeaderElection(ctx context.Context) {
 
 					rf.heartbeats.StartSending()
 					rf.leaderElection.StopTicker()
-
 				} else {
 					log.Print("Not luck, going to try the next time")
-					// rf.mu.Lock()
-					// if rf.currentTerm == args.Term {
-					// 	// rf.votedFor = -1
-					// 	// rf.currentTerm--
-					// }
-					// rf.mu.Unlock()
 				}
 
 				return
