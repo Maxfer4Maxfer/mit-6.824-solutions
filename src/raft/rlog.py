@@ -45,7 +45,7 @@ def main(
         file: typer.FileText = typer.Argument(
             None, help="File to read, stdin otherwise"),
         colorize: bool = typer.Option(True, "--no-color"),
-        n_columns: Optional[int] = typer.Option(None, "--columns", "-c"),
+        n_columns: Optional[int] = typer.Option(3, "--columns", "-c"),
         ignore: Optional[str] = typer.Option(
             None, "--ignore", "-i", callback=list_topics),
         just: Optional[str] = typer.Option(
@@ -53,10 +53,10 @@ def main(
     topics = list(TOPICS)
 
     # debug
-    file = open(
-        "/Users/maxim/go/src/github.com/Maxfer4Maxfer/mit-6.824/src/raft/log.txt",
-    )
-    n_columns = 5
+    # file = open(
+    #     "/Users/maxim/go/src/github.com/Maxfer4Maxfer/mit-6.824/src/raft/log.txt",
+    # )
+    # n_columns = 3
 
     # We can take input from a stdin (pipes) or from a file
     input_ = file if file else sys.stdin
