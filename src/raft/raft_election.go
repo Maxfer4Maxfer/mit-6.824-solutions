@@ -14,7 +14,7 @@ type leaderElectionEngine struct {
 	stopTickerCh       chan struct{}
 	resetTickerCh      chan struct{}
 	electionCancelFunc context.CancelFunc
-	leadeElectionFunc  func(context.Context)
+	leaderElectionFunc func(context.Context)
 }
 
 func initLeaderElectionEngine(
@@ -22,11 +22,11 @@ func initLeaderElectionEngine(
 	leaderElectionFunc func(context.Context),
 ) *leaderElectionEngine {
 	lee := &leaderElectionEngine{
-		log:               extendLoggerWithTopic(logger, leaderElectionLogTopic),
-		mu:                &sync.Mutex{},
-		resetTickerCh:     make(chan struct{}),
-		stopTickerCh:      make(chan struct{}),
-		leadeElectionFunc: leaderElectionFunc,
+		log:                extendLoggerWithTopic(logger, leaderElectionLogTopic),
+		mu:                 &sync.Mutex{},
+		resetTickerCh:      make(chan struct{}),
+		stopTickerCh:       make(chan struct{}),
+		leaderElectionFunc: leaderElectionFunc,
 	}
 
 	go lee.ticker(logger)
@@ -42,7 +42,7 @@ func (lee *leaderElectionEngine) StopTicker() {
 	lee.stopTickerCh <- struct{}{}
 }
 
-func (lee *leaderElectionEngine) stopLeaderElection() {
+func (lee *leaderElectionEngine) StopLeaderElection() {
 	lee.mu.Lock()
 	defer lee.mu.Unlock()
 
@@ -67,7 +67,7 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 		for range ticker.C {
 			log.Printf("Did not see a leader to much")
 
-			lee.stopLeaderElection()
+			lee.StopLeaderElection()
 
 			ctx, cancel := context.WithCancel(context.Background())
 
@@ -75,7 +75,7 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 			lee.electionCancelFunc = cancel
 			lee.mu.Unlock()
 
-			go lee.leadeElectionFunc(ctx)
+			go lee.leaderElectionFunc(ctx)
 
 			electionTimeoutCh <- time.Duration(rand.Int63n(max-min) + min)
 		}
@@ -87,8 +87,9 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 			ticker.Stop()
 			log.Printf("Stop the election ticker")
 		case <-lee.resetTickerCh:
+			lee.stopLeaderElection()
 			ticker.Reset(et)
-			log.Printf("Reset tne election ticker %v", et)
+			log.Printf("Reset the election ticker %v", et)
 		case et = <-electionTimeoutCh:
 			log.Printf("Set a new election timeout %v", et)
 			ticker.Reset(et)
@@ -158,6 +159,45 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	if electionTerm < rf.currentTerm {
+		log.Printf("Current term is higher since election started %d < %d",
+			electionTerm, rf.currentTerm)
+
+		rf.leaderElection.StopLeaderElection()
+
+		return
+	}
+
+	log.Printf("(%d/%d) voted, %d for, %d against",
+		nVoted, len(rf.peers), nVotedFor, nVoted-nVotedFor)
+
+	if nVotedFor > len(rf.peers)/2 || nVoted == len(rf.peers) {
+		if nVotedFor > len(rf.peers)/2 {
+			log.Printf("I am a new leader for term %d", electionTerm)
+
+			for i := range rf.peers {
+				log.Printf("Set nextIndex for S%d to %d", i, len(rf.log))
+				rf.nextIndex[i] = len(rf.log)
+				rf.matchIndex[i] = 0
+			}
+
+			rf.heartbeats.StartSending()
+			rf.leaderElection.StopTicker()
+		} else {
+			log.Print("Not luck, going to try the next time")
+		}
+
+		rf.leaderElection.StopLeaderElection()
+	}
+}
+
+func (rf *Raft) leaderElectionStart(ctx context.Context) {
+	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
+	log = extendLoggerWithCorrelationID(log, CorrelationID())
+
+	log.Printf("Starting new Leader election cycle")
+
+	rf.mu.Lock()
 	rf.currentTerm++
 	rf.votedFor = rf.me
 
