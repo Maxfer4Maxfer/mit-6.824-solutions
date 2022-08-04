@@ -253,6 +253,7 @@ func (rf *Raft) startLeaderElection(ctx context.Context) {
 					for i := range rf.nextIndex {
 						log.Printf("Set nextIndex for S%d to %d", i, nextIndex)
 						rf.nextIndex[i] = nextIndex
+						rf.matchIndex[i] = 0
 					}
 					rf.mu.Unlock()
 

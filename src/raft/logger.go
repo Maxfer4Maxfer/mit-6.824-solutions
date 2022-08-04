@@ -12,6 +12,7 @@ const (
 	leaderElectionLogTopic logTopic = "ELECT"
 	tickerLogTopic         logTopic = "TICKR"
 	applyLogTopic          logTopic = "APPLY"
+	matchIndexLogTopic     logTopic = "MATCH"
 	heartbeatingLogTopic   logTopic = "HRTBT"
 	startLogTopic          logTopic = "START"
 	appendEntriesLogTopic  logTopic = "APPND"

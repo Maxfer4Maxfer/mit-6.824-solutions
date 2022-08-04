@@ -18,7 +18,7 @@ TOPICS = {
     "BCMFL": "#4878bc",
     "START": "#398280",
     "APPLY": "#98719f",
-    "PERS": "#d08341",
+    "MATCH": "#d08341",
     "SNAP": "#FD971F",
     "DROP": "#ff615c",
     "CLNT": "#00813c",

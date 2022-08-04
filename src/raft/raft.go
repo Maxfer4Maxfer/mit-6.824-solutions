@@ -114,7 +114,8 @@ type Raft struct {
 
 	// index of highest log entry applied to state machine
 	// (initialized to 0, increases monotonically)
-	matchIndex []int
+	matchIndex     []int
+	matchIndexCond *sync.Cond
 }
 
 func (rf *Raft) commitIndex() int {
@@ -311,6 +312,7 @@ func Make(
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
+	rf.matchIndexProcessing()
 	rf.applyLogProcessing()
 
 	return rf

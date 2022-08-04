@@ -42,7 +42,7 @@ func (rf *Raft) startSyncWithPeerProcessReply(
 		}
 
 		if rf.matchIndex[peerID] < index {
-			rf.matchIndex[peerID] = index
+			rf.updateMatchIndex(peerID, index)
 		}
 	} else {
 		rf.nextIndex[peerID]--
