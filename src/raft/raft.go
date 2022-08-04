@@ -306,7 +306,7 @@ func Make(
 		rf.logger, broadcastTime, rf.sendHeartbeats,
 	)
 	rf.leaderElection = initLeaderElectionEngine(
-		rf.logger, rf.startLeaderElection,
+		rf.logger, rf.leaderElectionStart,
 	)
 
 	// initialize from state persisted before a crash

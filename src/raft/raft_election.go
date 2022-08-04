@@ -87,7 +87,6 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 			ticker.Stop()
 			log.Printf("Stop the election ticker")
 		case <-lee.resetTickerCh:
-			lee.stopLeaderElection()
 			ticker.Reset(et)
 			log.Printf("Reset the election ticker %v", et)
 		case et = <-electionTimeoutCh:
@@ -97,9 +96,9 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 	}
 }
 
-func (rf *Raft) askForVoting(
-	ctx context.Context, log *log.Logger,
-	peerID int, args *RequestVoteArgs, resCh chan int,
+func (rf *Raft) leaderElectionSendRequestVote(
+	log *log.Logger, wg *sync.WaitGroup, args *RequestVoteArgs,
+	peerID int, resultCh chan int,
 ) {
 	reply := &RequestVoteReply{}
 
@@ -108,44 +107,25 @@ func (rf *Raft) askForVoting(
 	log.Printf("-> S%d T:%d", peerID, args.Term)
 
 	if ok := rf.sendRequestVote(peerID, args, reply); !ok {
-		log.Printf("Fail RequestVote call to S%d peer (term: %d)",
-			peerID, args.Term)
+		log.Printf("Fail RequestVote call to S%d peer T:%d", peerID, args.Term)
 
 		return
 	}
 
-	log.Printf("RequestVote reply from S%d (term: %d)", peerID, args.Term)
+	log.Printf("RequestVote reply from S%d T:%d", peerID, args.Term)
 
 	rf.mu.Lock()
-	if args.Term < rf.currentTerm {
-		log.Printf("RequestVote reply from the previous term %d < %d",
-			args.Term, rf.currentTerm)
-
-		rf.mu.Unlock()
-
-		return
-	}
-
 	ok := rf.processIncomingTerm(log, peerID, reply.Term)
 	rf.mu.Unlock()
 
-	select {
-	case <-ctx.Done():
-		log.Printf("Skip S%d vote, election canceled (term %d)", peerID, args.Term)
+	if ok && reply.VoteGranted {
+		log.Printf("Win: S%d voted for us", peerID)
 
-		return
-	default:
-		if ok && reply.VoteGranted {
-			log.Printf("Win: S%d voted for us", peerID)
+		resultCh <- 1
+	} else {
+		log.Printf("Loose: S%d voted against us", peerID)
 
-			res = 1
-		} else {
-			log.Printf("Loose: S%d voted against us", peerID)
-
-			res = 0
-		}
-
-		resCh <- res
+		resultCh <- 0
 	}
 }
 
@@ -154,8 +134,39 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
 	log = extendLoggerWithCorrelationID(log, correlationID)
 
-	log.Printf("Starting new Leader election cycle")
+	wg.Add(len(rf.peers) - 1)
 
+	for peerID := range rf.peers {
+		if peerID == rf.me {
+			continue
+		}
+
+		go rf.leaderElectionSendRequestVote(log, wg, args, peerID, resultCh)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	return resultCh
+}
+
+func isLeaderElectionActive(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+func (rf *Raft) leaderElectionVotesCalculation(
+	log *log.Logger,
+	electionTerm int,
+	nVotedFor int,
+	nVoted int,
+) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -198,6 +209,11 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 	log.Printf("Starting new Leader election cycle")
 
 	rf.mu.Lock()
+
+	if !isLeaderElectionActive(ctx) {
+		return
+	}
+
 	rf.currentTerm++
 	rf.votedFor = rf.me
 
@@ -210,62 +226,25 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 		LastLogIndex:  len(rf.log) - 1,
 		LastLogTerm:   rf.log[len(rf.log)-1].Term,
 	}
-}
 
-func (rf *Raft) startLeaderElection(ctx context.Context) {
-	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
+	rf.mu.Unlock()
 
-	log.Printf("Starting new Leader election cycle")
+	nVoted := 1    // already voted for themselves
+	nVotedFor := 1 // already voted for themselves
 
-	args := rf.prepareForVote(log)
-	nVoted := 1             // already voted for themselves
-	nVotedFor := 1          // already voted for themselves
-	resCh := make(chan int) // 0 - votedFor; 1 - votedAgeinst
+	resultCh := rf.leaderElectionSendRequestVotes(log, args.DeepCopy())
 
-	for i := range rf.peers {
-		if i == rf.me {
-			continue
-		}
-
-		go rf.askForVoting(ctx, log, i, args.DeepCopy(), resCh)
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("Stop election for term %d", args.Term)
+	for result := range resultCh {
+		if !isLeaderElectionActive(ctx) {
+			log.Printf("Skip vote, election canceled T:%d", args.Term)
 
 			return
-		case res := <-resCh:
-			nVotedFor += res
-			nVoted++
-
-			log.Printf("(%d/%d) voted, %d for, %d against",
-				nVoted, len(rf.peers), nVotedFor, nVoted-nVotedFor)
-
-			if nVotedFor > len(rf.peers)/2 || nVoted == len(rf.peers) {
-				if nVotedFor > len(rf.peers)/2 {
-					log.Printf("I am a new leader for term %d", args.Term)
-
-					rf.mu.Lock()
-					nextIndex := len(rf.log)
-
-					for i := range rf.nextIndex {
-						log.Printf("Set nextIndex for S%d to %d", i, nextIndex)
-						rf.nextIndex[i] = nextIndex
-						rf.matchIndex[i] = 0
-					}
-					rf.mu.Unlock()
-
-					rf.heartbeats.StartSending()
-					rf.leaderElection.StopTicker()
-				} else {
-					log.Print("Not luck, going to try the next time")
-				}
-
-				return
-			}
 		}
+
+		nVotedFor += result
+		nVoted++
+
+		rf.leaderElectionVotesCalculation(log, args.Term, nVotedFor, nVoted)
 	}
 }
 

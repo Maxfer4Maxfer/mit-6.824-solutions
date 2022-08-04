@@ -5,10 +5,10 @@ import (
 	"sync"
 )
 
-type startRepllyAction int
+type startReplyAction int
 
 const (
-	startReplyActionRetry startRepllyAction = iota
+	startReplyActionRetry startReplyAction = iota
 	startReplyActionAnotherFailedExit
 	startReplyActionAnotherPossitiveExit
 )
@@ -19,7 +19,7 @@ func (rf *Raft) startSyncWithPeerProcessReply(
 	originalTerm int,
 	reply *AppendEntriesReply,
 	index int,
-) startRepllyAction {
+) startReplyAction {
 	log.Printf("<- S%d AppendEntiresReply %+v", peerID, reply)
 
 	rf.mu.Lock()
