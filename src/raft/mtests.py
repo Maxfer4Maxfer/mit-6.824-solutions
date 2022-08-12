@@ -99,19 +99,66 @@ def print_results(results: Dict[str, Dict[str, StatsMeter]], timing=False):
 
     print(table)
 
+def make_total_coverage(
+    coverages: [], base_dir: Optional[Path], coverage_output: Optional[Path]
+):
+    f, path = tempfile.mkstemp()
 
-def run_test(test: str, race: bool, timing: bool):
+    with open(path, 'w') as outfile:
+        for fname in coverages:
+            with open(fname) as infile:
+                outfile.write(infile.read())
+                os.remove(fname)
+
+
+    total_path = (base_dir / "coverage.out").as_posix()
+    with open(path, 'r') as infile:
+        uniqlines = set(infile.readlines())
+
+        with open(total_path, 'w') as outfile:
+            mode_set = "mode: set\n"
+            mode_atomic = "mode: atomic\n"
+
+            if mode_set in uniqlines:
+                uniqlines.discard(mode_set)
+                outfile.write(mode_set)
+
+            if mode_atomic in uniqlines:
+                uniqlines.discard(mode_atomic)
+                outfile.write(mode_atomic)
+
+            outfile.writelines(sorted(list(uniqlines), reverse=True))
+
+    output = (base_dir / "coverage.html").as_posix()
+    print(output)
+
+    convert_cmd = ["go", "tool", "cover", f"-html={total_path}", f"-o={output}"]
+    proc = subprocess.run(convert_cmd)
+
+    if proc.returncode == 0:
+        shutil.copyfile(str(output), str(coverage_output))
+        print(f"test coverage: {coverage_output}")
+
+
+    os.remove(path)
+    os.remove(total_path)
+
+def run_test(test: str, race: bool, coverage: bool, timing: bool):
     test_cmd = ["go", "test", f"-run={test}"]
+    dpath = tempfile.mkdtemp()
+    f, path = tempfile.mkstemp(dir=dpath)
     if race:
         test_cmd.append("-race")
+    if coverage:
+        test_cmd.append(f"-coverprofile={dpath}/coverage.out")
     if timing:
         test_cmd = ["time"] + cmd
-    f, path = tempfile.mkstemp()
+
     start = time.time()
     proc = subprocess.run(test_cmd, stdout=f, stderr=f)
     runtime = time.time() - start
     os.close(f)
-    return test, path, proc.returncode, runtime
+    return test, dpath, path, proc.returncode, runtime
 
 
 def last_line(file: str) -> str:
@@ -164,22 +211,27 @@ shortcut = {
 
 def run_tests(
     tests: List[str],
-    sequential: bool       = typer.Option(False,  '--sequential',      '-s',    help='Run all test of each group in order'),
-    workers: int           = typer.Option(8,      '--workers',         '-p',    help='Number of parallel tasks'),
-    iterations: int        = typer.Option(10,     '--iter',            '-n',    help='Number of iterations to run'),
-    output: Optional[Path] = typer.Option(None,   '--output',          '-o',    help='Output path to use'),
-    output_base_dir: Optional[Path] = typer.Option("logs",   '--output-dir', '-d',    help='Base output dir to use'),
-    verbose: int           = typer.Option(0,      '--verbose',         '-v',    help='Verbosity level', count=True),
-    archive: bool          = typer.Option(False,  '--archive',         '-a',    help='Save all logs intead of only failed ones'),
-    race: bool             = typer.Option(False,  '--race/--no-race',  '-r/-R', help='Run with race checker'),
-    loop: bool             = typer.Option(False,  '--loop',            '-l',    help='Run continuously'),
-    growth: int            = typer.Option(10,     '--growth',          '-g',    help='Growth ratio of iterations when using --loop'),
-    timing: bool           = typer.Option(False,   '--timing',         '-t',    help='Report timing, only works on macOS'),
+    sequential: bool                = typer.Option(False,  '--sequential',      '-s',    help='Run all test of each group in order'),
+    workers: int                    = typer.Option(8,      '--workers',         '-p',    help='Number of parallel tasks'),
+    iterations: int                 = typer.Option(10,     '--iter',            '-n',    help='Number of iterations to run'),
+    output: Optional[Path]          = typer.Option(None,   '--output',          '-o',    help='Output path to use'),
+    output_base_dir: Optional[Path] = typer.Option("logs", '--output-dir',      '-d',    help='Base output dir to use'),
+    verbose: int                    = typer.Option(0,      '--verbose',         '-v',    help='Verbosity level', count=True),
+    archive: bool                   = typer.Option(False,  '--archive',         '-a',    help='Save all logs intead of only failed ones'),
+    race: bool                      = typer.Option(False,  '--race/--no-race',  '-r/-R', help='Run with race checker'),
+    coverage: bool                  = typer.Option(False,  '--coverage',        '-c',    help='Output path for a total caverage raport'),
+    coverage_output: Optional[Path] = typer.Option(None,   '--coverage-output', '-co',   help='Special output for a total caverage report'),
+    loop: bool                      = typer.Option(False,  '--loop',            '-l',    help='Run continuously'),
+    growth: int                     = typer.Option(10,     '--growth',          '-g',    help='Growth ratio of iterations when using --loop'),
+    timing: bool                    = typer.Option(False,   '--timing',         '-t',    help='Report timing, only works on macOS'),
 ):
 
     if output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         output = output_base_dir / Path(timestamp)
+
+    if coverage and coverage_output is None:
+        coverage_output = Path("/home/maxim/host/coverate.html")
 
     if race:
         print("[yellow]Running with the race detector\n[/yellow]")
@@ -199,7 +251,6 @@ def run_tests(
     tests = ts
 
     while True:
-
         total = iterations * len(tests)
         completed = 0
 
@@ -252,6 +303,7 @@ def run_tests(
             with ThreadPoolExecutor(max_workers=workers) as executor:
 
                 futures = []
+                coverages = []
                 while completed < total:
                     n = len(futures)
                     if n < workers:
@@ -259,12 +311,12 @@ def run_tests(
                                 test_instances, workers-n):
                             futures.append(
                                 executor.submit(
-                                    run_test, test, race, timing))
+                                    run_test, test, race, coverage, timing))
 
                     done, not_done = wait(futures, return_when=FIRST_COMPLETED)
 
                     for future in done:
-                        test, path, rc, runtime = future.result()
+                        test, dpath, path, rc, runtime = future.result()
 
                         results[test]['completed'].add(1)
                         results[test]['time'].add(runtime)
@@ -284,6 +336,12 @@ def run_tests(
                             output.mkdir(exist_ok=True, parents=True)
                             shutil.copy(path, dest)
 
+                        if coverage:
+                            output.mkdir(exist_ok=True, parents=True)
+                            dest = (output / f"{test}_{completed}_c.out").as_posix()
+                            shutil.copy(f"{dpath}/coverage.out", dest)
+                            coverages.append(dest)
+
                         if timing:
                             line = last_line(path)
                             real, _, user, _, system, _ = line.replace(
@@ -292,12 +350,14 @@ def run_tests(
                             results[test]['user_time'].add(float(user))
                             results[test]['system_time'].add(float(system))
 
-                        os.remove(path)
+                        shutil.rmtree(dpath)
 
                         completed += 1
                         total_progress.update(total_task, advance=1)
 
                         futures = list(not_done)
+        if coverage:
+            make_total_coverage(coverages, output, coverage_output)
 
         print_results(results, timing)
 
