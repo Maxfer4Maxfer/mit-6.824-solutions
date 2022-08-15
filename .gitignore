@@ -4,3 +4,6 @@ api.key
 *-handin.tar.gz
 
 src/raft/logs
+
+src/raft/coverage.out
+src/raft/log.txt
