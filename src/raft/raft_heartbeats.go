@@ -77,34 +77,19 @@ func (rf *Raft) sendHeartbeats(correlationID string) {
 		CorrelationID: correlationID,
 		Term:          rf.currentTerm,
 		LeaderID:      rf.me,
-		PrevLogIndex:  len(rf.log) - 1,
-		PrevLogTerm:   rf.log[len(rf.log)-1].Term,
 		LeaderCommit:  rf.commitIndex(),
 	}
+
+	index := len(rf.log) - 1
 	rf.mu.Unlock()
 
 	log.Printf("Hearbeats for term %d", args.Term)
 
-	for i := range rf.peers {
-		if i == rf.me {
+	for peerID := range rf.peers {
+		if peerID == rf.me {
 			continue
 		}
 
-		go func(peerID int) {
-			reply := &AppendEntriesReply{}
-
-			log.Printf("Hearbeats to S%d (term %d)", peerID, args.Term)
-
-			if ok := rf.sendAppendEntries(peerID, args.DeepCopy(), reply); !ok {
-				log.Printf("Fail hearbeating to %d peer (term %d)",
-					peerID, args.Term)
-
-				return
-			}
-
-			rf.mu.Lock()
-			rf.processIncomingTerm(log, peerID, reply.Term)
-			rf.mu.Unlock()
-		}(i)
+		go rf.sync(log, peerID, index, args.DeepCopy())
 	}
 }

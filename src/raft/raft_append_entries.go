@@ -7,10 +7,14 @@ func (rf *Raft) AppendEntries(
 ) {
 	log := rf.appendEntriesCreateLogger(args)
 
-	log.Printf("AppendEntries from S%d %+v", args.LeaderID, args)
+	log.Printf("<- S%d {T:%d PLI:%d PLT:%d LC:%d len(Entries):%d}",
+		args.LeaderID, args.Term, args.PrevLogIndex, args.PrevLogTerm,
+		args.LeaderCommit, len(args.Entries))
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	log.Printf("Current state: {T:%d LC:%d}", rf.currentTerm, rf.commitIndex())
 
 	reply.Term = rf.currentTerm
 
@@ -87,13 +91,13 @@ func (rf *Raft) appendEntriesProcessIncomingEntries(
 			index = i
 			add = true
 
-			log.Printf("take entries from %d", index)
+			log.Printf("Take entries from %d", index)
 
 			break
 		}
 
 		if rf.log[args.PrevLogIndex+(i+1)].Term != args.Entries[i].Term {
-			log.Printf("shrink local log [:%d] len(rf.log): %d",
+			log.Printf("Shrink local log [:%d] len(rf.log): %d",
 				args.PrevLogIndex+(i+1), len(rf.log))
 
 			rf.log = rf.log[:args.PrevLogIndex+(i+1)]
@@ -104,10 +108,10 @@ func (rf *Raft) appendEntriesProcessIncomingEntries(
 	}
 
 	if add {
-		log.Printf("append [%d:]", index)
+		log.Printf("Append [%d:]", index)
 		rf.log = append(rf.log, args.Entries[index:]...)
 	} else {
-		log.Printf("no new entries")
+		log.Printf("No new entries")
 	}
 }
 
@@ -128,4 +132,114 @@ func (rf *Raft) appendEntriesProcessLeaderCommit(
 	}
 
 	rf.setCommitIndex(min)
+}
+
+type syncProcessReplyReturn int
+
+const (
+	syncProcessReplyReturnSucess syncProcessReplyReturn = iota
+	syncProcessReplyReturnFailed
+	syncProcessReplyReturnRetry
+)
+
+func (rf *Raft) syncProcessReply(
+	log *log.Logger,
+	peerID int,
+	originalTerm int,
+	reply *AppendEntriesReply,
+	index int,
+) syncProcessReplyReturn {
+	log.Printf("<- S%d {T:%d S:%v}", peerID, reply.Term, reply.Success)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	switch {
+	case originalTerm < rf.currentTerm:
+		log.Printf("ApplyEntries reply from the previous term %d < %d",
+			originalTerm, rf.currentTerm)
+
+		return syncProcessReplyReturnRetry
+	case reply.Term > rf.currentTerm:
+		log.Printf("S%d has a higher term %d > %d",
+			peerID, reply.Term, rf.currentTerm)
+
+		if rf.heartbeats.IsSendingInProgress() {
+			rf.heartbeats.StopSending()
+			rf.leaderElection.ResetTicker()
+		} else {
+			rf.leaderElection.StopLeaderElection()
+		}
+
+		rf.votedFor = -1
+		rf.currentTerm = reply.Term
+
+		return syncProcessReplyReturnFailed
+
+	case !reply.Success:
+		rf.nextIndex[peerID]--
+
+		return syncProcessReplyReturnRetry
+	default:
+		if rf.nextIndex[peerID] < index+1 {
+			rf.nextIndex[peerID] = index + 1
+		}
+
+		if rf.matchIndex[peerID] < index {
+			rf.updateMatchIndex(peerID, index)
+		}
+
+		return syncProcessReplyReturnSucess
+	}
+}
+
+func (rf *Raft) sync(
+	log *log.Logger,
+	peerID int,
+	index int,
+	args *AppendEntriesArgs,
+) bool {
+	reply := &AppendEntriesReply{}
+
+	for {
+		if !rf.heartbeats.IsSendingInProgress() {
+			return false
+		}
+
+		rf.mu.Lock()
+
+		if rf.nextIndex[peerID] > index+1 {
+			log.Printf("S%d already updated by someone else", peerID)
+			rf.mu.Unlock()
+
+			return true
+		}
+
+		args.PrevLogIndex = rf.nextIndex[peerID] - 1
+		args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
+		args.Entries = append(
+			[]LogEntry(nil), rf.log[rf.nextIndex[peerID]:index+1]...)
+
+		rf.mu.Unlock()
+
+		log.Printf("-> S%d {T:%d PLI:%d PLT:%d LC:%d len(Entries):%d}",
+			peerID, args.Term, args.PrevLogIndex, args.PrevLogTerm,
+			args.LeaderCommit, len(args.Entries))
+
+		if ok := rf.sendAppendEntries(peerID, args, reply); !ok {
+			log.Printf("WRN fail AppendEntries call to %d peer", peerID)
+
+			continue
+		}
+
+		a := rf.syncProcessReply(log, peerID, args.Term, reply, index)
+		switch a {
+		case syncProcessReplyReturnRetry:
+			continue
+		case syncProcessReplyReturnFailed:
+			return false
+		case syncProcessReplyReturnSucess:
+			return true
+		}
+	}
 }

@@ -184,7 +184,7 @@ func (rf *Raft) leaderElectionVotesCalculation(
 
 	if nVotedFor > len(rf.peers)/2 || nVoted == len(rf.peers) {
 		if nVotedFor > len(rf.peers)/2 {
-			log.Printf("I am a new leader for term %d", electionTerm)
+			log.Printf("New leader T:%d", electionTerm)
 
 			for i := range rf.peers {
 				log.Printf("Set nextIndex for S%d to %d", i, len(rf.log))
@@ -211,6 +211,8 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 	rf.mu.Lock()
 
 	if !isLeaderElectionActive(ctx) {
+		rf.mu.Unlock()
+
 		return
 	}
 

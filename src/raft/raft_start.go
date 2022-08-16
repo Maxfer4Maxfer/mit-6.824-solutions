@@ -5,113 +5,6 @@ import (
 	"sync"
 )
 
-type startReplyAction int
-
-const (
-	startReplyActionRetry startReplyAction = iota
-	startReplyActionAnotherFailedExit
-	startReplyActionAnotherPossitiveExit
-)
-
-func (rf *Raft) startSyncWithPeerProcessReply(
-	log *log.Logger,
-	peerID int,
-	originalTerm int,
-	reply *AppendEntriesReply,
-	index int,
-) startReplyAction {
-	log.Printf("<- S%d AppendEntiresReply %+v", peerID, reply)
-
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	if originalTerm < rf.currentTerm {
-		log.Printf("ApplyEntries reply from the previous term %d < %d",
-			originalTerm, rf.currentTerm)
-
-		return startReplyActionRetry
-	}
-
-	if ok := rf.processIncomingTerm(log, peerID, reply.Term); !ok {
-		return startReplyActionAnotherFailedExit
-	}
-
-	if reply.Success {
-		if rf.nextIndex[peerID] < index+1 {
-			rf.nextIndex[peerID] = index + 1
-		}
-
-		if rf.matchIndex[peerID] < index {
-			rf.updateMatchIndex(peerID, index)
-		}
-	} else {
-		rf.nextIndex[peerID]--
-
-		return startReplyActionRetry
-	}
-
-	return startReplyActionAnotherPossitiveExit
-}
-
-func (rf *Raft) startSyncWithPeer(
-	log *log.Logger,
-	wg *sync.WaitGroup,
-	peerID int,
-	resultCh chan struct{},
-	args *AppendEntriesArgs,
-	index int,
-) {
-	defer wg.Done()
-
-	reply := &AppendEntriesReply{}
-
-	for {
-		if !rf.heartbeats.IsSendingInProgress() {
-			return
-		}
-
-		rf.mu.Lock()
-
-		if rf.nextIndex[peerID] > index+1 {
-			log.Printf("S%d already updated by someoune else", peerID)
-			resultCh <- struct{}{}
-			rf.mu.Unlock()
-
-			return
-		}
-
-		args.PrevLogIndex = rf.nextIndex[peerID] - 1
-		args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
-		args.Entries = append(
-			[]LogEntry(nil), rf.log[rf.nextIndex[peerID]:index+1]...)
-
-		rf.mu.Unlock()
-
-		log.Printf("-> S%d {Term:%d PrevLogIndex:%d "+
-			"PrevLogTerm:%d len(Entries):%d LeaderCommit:%d}",
-			peerID, args.Term, args.PrevLogIndex, args.PrevLogTerm,
-			len(args.Entries), args.LeaderCommit)
-
-		if ok := rf.sendAppendEntries(peerID, args, reply); !ok {
-			log.Printf("WRN fail AppendEntries call to %d peer", peerID)
-
-			continue
-		}
-
-		a := rf.startSyncWithPeerProcessReply(log, peerID, args.Term, reply, index)
-		switch a {
-		case startReplyActionRetry:
-			continue
-		case startReplyActionAnotherFailedExit:
-			return
-		case startReplyActionAnotherPossitiveExit:
-			resultCh <- struct{}{}
-
-			return
-		}
-	}
-}
-
 func (rf *Raft) startProcessAnswers(index int, resultCh chan struct{}) {
 	done := false
 	cAnswers := 1 // already count itself
@@ -183,20 +76,27 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := len(rf.log) - 1
 	rf.mu.Unlock()
 
-	log.Printf("append a local log")
 	log.Printf("append to index: %d", index)
 
 	wg := &sync.WaitGroup{}
 	resultCh := make(chan struct{}) // true - ok false - cancel everything
+
+	wg.Add(len(rf.peers) - 1)
 
 	for peerID := range rf.peers {
 		if peerID == rf.me {
 			continue
 		}
 
-		wg.Add(1)
+		go func(peerID int) {
+			defer wg.Done()
 
-		go rf.startSyncWithPeer(log, wg, peerID, resultCh, args.DeepCopy(), index)
+			ok := rf.sync(log, peerID, index, args.DeepCopy())
+			if ok {
+				resultCh <- struct{}{}
+			}
+
+		}(peerID)
 	}
 
 	go func() {
