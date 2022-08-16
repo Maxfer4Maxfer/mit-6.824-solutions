@@ -132,7 +132,13 @@ def make_total_coverage(
     output = (base_dir / "coverage.html").as_posix()
     print(output)
 
-    convert_cmd = ["go", "tool", "cover", f"-html={total_path}", f"-o={output}"]
+    convert_cmd = [
+        "go",
+        "tool",
+        "cover",
+        f"-html={total_path}",
+        f"-o={output}",
+    ]
     proc = subprocess.run(convert_cmd)
 
     if proc.returncode == 0:
@@ -143,7 +149,8 @@ def make_total_coverage(
     os.remove(total_path)
 
 
-def run_test(test: str, race: bool, coverage: bool, timeout: str, timing: bool):
+def run_test(test: str, race: bool, coverage: bool,
+             timeout: str, timing: bool):
     test_cmd = ["go", "test", f"-run={test}", f"-timeout={timeout}"]
     dpath = tempfile.mkdtemp()
     f, path = tempfile.mkstemp(dir=dpath)
@@ -153,8 +160,6 @@ def run_test(test: str, race: bool, coverage: bool, timeout: str, timing: bool):
         test_cmd.append(f"-coverprofile={dpath}/coverage.out")
     if timing:
         test_cmd = ["time"].append(test_cmd)
-
-    # print(test_cmd)
 
     start = time.time()
     proc = subprocess.run(test_cmd, stdout=f, stderr=f)
@@ -314,7 +319,12 @@ def run_tests(
                                 test_instances, workers-n):
                             futures.append(
                                 executor.submit(
-                                    run_test, test, race, coverage, timeout, timing))
+                                    run_test,
+                                    test,
+                                    race,
+                                    coverage,
+                                    timeout,
+                                    timing))
 
                     done, not_done = wait(futures, return_when=FIRST_COMPLETED)
 
@@ -341,7 +351,8 @@ def run_tests(
 
                         if coverage:
                             output.mkdir(exist_ok=True, parents=True)
-                            dest = (output / f"{test}_{completed}_c.out").as_posix()
+                            dest = (
+                                output / f"{test}_{completed}_c.out").as_posix()
                             shutil.copy(f"{dpath}/coverage.out", dest)
                             coverages.append(dest)
 
