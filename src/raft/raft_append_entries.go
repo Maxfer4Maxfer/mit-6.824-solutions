@@ -145,7 +145,7 @@ const (
 func (rf *Raft) syncProcessReply(
 	log *log.Logger,
 	peerID int,
-	originalTerm int,
+	args *AppendEntriesArgs,
 	reply *AppendEntriesReply,
 	index int,
 ) syncProcessReplyReturn {
@@ -155,9 +155,9 @@ func (rf *Raft) syncProcessReply(
 	defer rf.mu.Unlock()
 
 	switch {
-	case originalTerm < rf.currentTerm:
+	case args.Term < rf.currentTerm:
 		log.Printf("ApplyEntries reply from the previous term %d < %d",
-			originalTerm, rf.currentTerm)
+			args.Term, rf.currentTerm)
 
 		return syncProcessReplyReturnRetry
 	case reply.Term > rf.currentTerm:
@@ -177,7 +177,9 @@ func (rf *Raft) syncProcessReply(
 		return syncProcessReplyReturnFailed
 
 	case !reply.Success:
-		rf.nextIndex[peerID]--
+		if rf.nextIndex[peerID] >= args.PrevLogIndex+1 {
+			rf.nextIndex[peerID]--
+		}
 
 		return syncProcessReplyReturnRetry
 	default:
@@ -232,7 +234,7 @@ func (rf *Raft) sync(
 			continue
 		}
 
-		a := rf.syncProcessReply(log, peerID, args.Term, reply, index)
+		a := rf.syncProcessReply(log, peerID, args, reply, index)
 		switch a {
 		case syncProcessReplyReturnRetry:
 			continue
