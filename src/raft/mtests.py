@@ -143,8 +143,8 @@ def make_total_coverage(
     os.remove(path)
     os.remove(total_path)
 
-def run_test(test: str, race: bool, coverage: bool, timing: bool):
-    test_cmd = ["go", "test", f"-run={test}"]
+def run_test(test: str, race: bool, coverage: bool, timeout: str, timing: bool):
+    test_cmd = ["go", "test", f"-run={test}", f"-timeout={timeout}"]
     dpath = tempfile.mkdtemp()
     f, path = tempfile.mkstemp(dir=dpath)
     if race:
@@ -153,6 +153,8 @@ def run_test(test: str, race: bool, coverage: bool, timing: bool):
         test_cmd.append(f"-coverprofile={dpath}/coverage.out")
     if timing:
         test_cmd = ["time"] + cmd
+
+    # print(test_cmd)
 
     start = time.time()
     proc = subprocess.run(test_cmd, stdout=f, stderr=f)
@@ -214,6 +216,7 @@ def run_tests(
     sequential: bool                = typer.Option(False,  '--sequential',      '-s',    help='Run all test of each group in order'),
     workers: int                    = typer.Option(8,      '--workers',         '-p',    help='Number of parallel tasks'),
     iterations: int                 = typer.Option(10,     '--iter',            '-n',    help='Number of iterations to run'),
+    timeout: str                    = typer.Option("30s",  '--timeout',         '-t',    help='Timeout for each test'),
     output: Optional[Path]          = typer.Option(None,   '--output',          '-o',    help='Output path to use'),
     output_base_dir: Optional[Path] = typer.Option("logs", '--output-dir',      '-d',    help='Base output dir to use'),
     verbose: int                    = typer.Option(0,      '--verbose',         '-v',    help='Verbosity level', count=True),
@@ -311,7 +314,7 @@ def run_tests(
                                 test_instances, workers-n):
                             futures.append(
                                 executor.submit(
-                                    run_test, test, race, coverage, timing))
+                                    run_test, test, race, coverage, timeout, timing))
 
                     done, not_done = wait(futures, return_when=FIRST_COMPLETED)
 
