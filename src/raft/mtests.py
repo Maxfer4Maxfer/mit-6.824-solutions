@@ -99,6 +99,7 @@ def print_results(results: Dict[str, Dict[str, StatsMeter]], timing=False):
 
     print(table)
 
+
 def make_total_coverage(
     coverages: [], base_dir: Optional[Path], coverage_output: Optional[Path]
 ):
@@ -109,7 +110,6 @@ def make_total_coverage(
             with open(fname) as infile:
                 outfile.write(infile.read())
                 os.remove(fname)
-
 
     total_path = (base_dir / "coverage.out").as_posix()
     with open(path, 'r') as infile:
@@ -139,9 +139,9 @@ def make_total_coverage(
         shutil.copyfile(str(output), str(coverage_output))
         print(f"test coverage: {coverage_output}")
 
-
     os.remove(path)
     os.remove(total_path)
+
 
 def run_test(test: str, race: bool, coverage: bool, timeout: str, timing: bool):
     test_cmd = ["go", "test", f"-run={test}", f"-timeout={timeout}"]
@@ -152,7 +152,7 @@ def run_test(test: str, race: bool, coverage: bool, timeout: str, timing: bool):
     if coverage:
         test_cmd.append(f"-coverprofile={dpath}/coverage.out")
     if timing:
-        test_cmd = ["time"] + cmd
+        test_cmd = ["time"].append(test_cmd)
 
     # print(test_cmd)
 
