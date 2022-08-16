@@ -5,7 +5,9 @@ import (
 	"sync"
 )
 
-func (rf *Raft) startProcessAnswers(index int, resultCh chan struct{}) {
+func (rf *Raft) startProcessAnswers(
+	log *log.Logger, index int, resultCh chan struct{},
+) {
 	done := false
 	cAnswers := 1 // already count itself
 
@@ -19,7 +21,7 @@ func (rf *Raft) startProcessAnswers(index int, resultCh chan struct{}) {
 		log.Printf("(%d/%d) answers", cAnswers, len(rf.peers))
 
 		if cAnswers == len(rf.peers)/2+1 {
-			log.Printf("increasing comminIndex")
+			log.Printf("increasing commitIndex")
 
 			rf.setCommitIndex(index)
 
@@ -54,17 +56,16 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	log.Printf("Start call %v", command)
 
+	rf.mu.Lock()
 	if !rf.heartbeats.IsSendingInProgress() {
 		log.Printf("Not a leader")
 
-		rf.mu.Lock()
 		ct := rf.currentTerm
 		rf.mu.Unlock()
 
 		return -1, ct, false
 	}
 
-	rf.mu.Lock()
 	args := &AppendEntriesArgs{
 		CorrelationID: correlationID,
 		Term:          rf.currentTerm,
@@ -104,7 +105,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		close(resultCh)
 	}()
 
-	go rf.startProcessAnswers(index, resultCh)
+	go rf.startProcessAnswers(log, index, resultCh)
 
 	return index, args.Term, true
 }
