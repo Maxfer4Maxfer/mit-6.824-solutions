@@ -129,10 +129,11 @@ func (rf *Raft) leaderElectionSendRequestVote(
 	}
 }
 
-func (rf *Raft) leaderElectionStart(ctx context.Context) {
-	correlationID := CorrelationID()
-	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
-	log = extendLoggerWithCorrelationID(log, correlationID)
+func (rf *Raft) leaderElectionSendRequestVotes(
+	log *log.Logger, args *RequestVoteArgs,
+) chan int {
+	resultCh := make(chan int) // 0 - votedFor; 1 - votedAgeinst
+	wg := &sync.WaitGroup{}
 
 	wg.Add(len(rf.peers) - 1)
 
@@ -203,8 +204,9 @@ func (rf *Raft) leaderElectionVotesCalculation(
 }
 
 func (rf *Raft) leaderElectionStart(ctx context.Context) {
+	correlationID := CorrelationID()
 	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
-	log = extendLoggerWithCorrelationID(log, CorrelationID())
+	log = extendLoggerWithCorrelationID(log, correlationID)
 
 	log.Printf("Starting new Leader election cycle")
 
