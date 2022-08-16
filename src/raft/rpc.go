@@ -1,9 +1,7 @@
 package raft
 
-//
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
-//
 type RequestVoteArgs struct {
 	// CorrelationsID is used to trace requests across multiple raft instance.
 	CorrelationID string
@@ -31,17 +29,14 @@ func (r *RequestVoteArgs) DeepCopy() *RequestVoteArgs {
 	}
 }
 
-//
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
-//
 type RequestVoteReply struct {
 	// Your data here (2A).
 	Term        int  // currentTerm, for candidate to update itself
 	VoteGranted bool // true means candidate received vote
 }
 
-//
 // example code to send a RequestVote RPC to a server.
 // server is the index of the target server in rf.peers[].
 // expects RPC arguments in args.
@@ -69,7 +64,6 @@ type RequestVoteReply struct {
 // capitalized all field names in structs passed over RPC, and
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
-//
 func (rf *Raft) sendRequestVote(
 	server int, args *RequestVoteArgs, reply *RequestVoteReply,
 ) bool {

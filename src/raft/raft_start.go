@@ -96,7 +96,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			if ok {
 				resultCh <- struct{}{}
 			}
-
 		}(peerID)
 	}
 
