@@ -1002,13 +1002,17 @@ func TestFigure8Unreliable2C(t *testing.T) {
 
 	nup := servers
 	for iters := 0; iters < 1000; iters++ {
+		fmt.Printf("Test: iteration %d connected:%+v\n", iters, cfg.connected)
+
 		if iters == 200 {
+			fmt.Printf("Test: setlongreordering\n")
 			cfg.setlongreordering(true)
 		}
 		leader := -1
 		for i := 0; i < servers; i++ {
 			_, _, ok := cfg.rafts[i].Start(rand.Int() % 10000)
 			if ok && cfg.connected[i] {
+				fmt.Printf("Test: leader S%d connected:%+v\n", i, cfg.connected)
 				leader = i
 			}
 		}
@@ -1022,6 +1026,7 @@ func TestFigure8Unreliable2C(t *testing.T) {
 		}
 
 		if leader != -1 && (rand.Int()%1000) < int(RaftElectionTimeout/time.Millisecond)/2 {
+			fmt.Printf("Test: disconnect leader S%d connected:%+v\n", leader, cfg.connected)
 			cfg.disconnect(leader)
 			nup -= 1
 		}
@@ -1029,18 +1034,22 @@ func TestFigure8Unreliable2C(t *testing.T) {
 		if nup < 3 {
 			s := rand.Int() % servers
 			if cfg.connected[s] == false {
+				fmt.Printf("Test: nup < 3 connect S%d connected:%+v\n", s, cfg.connected)
 				cfg.connect(s)
 				nup += 1
 			}
 		}
 	}
 
+	fmt.Printf("Test: connect everyone back\n")
 	for i := 0; i < servers; i++ {
 		if cfg.connected[i] == false {
+			fmt.Printf("Test: connect S%d\n", i)
 			cfg.connect(i)
 		}
 	}
 
+	fmt.Printf("Test: final call\n")
 	cfg.one(rand.Int()%10000, servers, true)
 
 	cfg.end()
