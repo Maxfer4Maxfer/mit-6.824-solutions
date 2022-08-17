@@ -49,7 +49,10 @@ def main(
         ignore: Optional[str] = typer.Option(
             None, "--ignore", "-i", callback=list_topics),
         just: Optional[str] = typer.Option(
-            None, "--just", "-j", callback=list_topics),):
+            None, "--just", "-j", callback=list_topics),
+        warning: bool = typer.Option(
+            False, '--warning/--no-warning', '-w',
+            help='Include messages with WRN'),):
     topics = list(TOPICS)
 
     # We can take input from a stdin (pipes) or from a file
@@ -80,6 +83,9 @@ def main(
                 console.print("#" * console.width)
                 continue
 
+            if not warning and "WRN" in line:
+                continue
+
             # S5 ELECT 18:19:20.292541 raft.go:360: 6 peer voted against us
             peer, topic_cID, time, code_line, *msg = line.strip().split(" ")
 
@@ -93,7 +99,7 @@ def main(
 
             msg = " ".join(msg)
 
-            if len(correlationID) == 1: 
+            if len(correlationID) == 1:
                 msg = "[" + correlationID[0] + "] " + msg
 
             # Colorize output by using rich syntax when needed
