@@ -66,8 +66,7 @@ func (rf *Raft) matchIndexProcessing() {
 					continue
 				}
 
-				log.Printf("Set commitIndext to %d", N)
-				rf.setCommitIndex(N)
+				rf.setCommitIndex(log, N)
 
 				break
 			}

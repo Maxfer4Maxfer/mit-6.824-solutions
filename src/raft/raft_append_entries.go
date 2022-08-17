@@ -132,7 +132,7 @@ func (rf *Raft) appendEntriesProcessLeaderCommit(
 		min = len(rf.log) - 1
 	}
 
-	rf.setCommitIndex(min)
+	rf.setCommitIndex(log, min)
 }
 
 type syncProcessReplyReturn int
@@ -160,7 +160,7 @@ func (rf *Raft) syncProcessReply(
 		log.Printf("ApplyEntries reply from the previous term %d < %d",
 			args.Term, rf.currentTerm)
 
-		return syncProcessReplyReturnRetry
+		return syncProcessReplyReturnFailed
 	case reply.Term > rf.currentTerm:
 		log.Printf("S%d has a higher term %d > %d",
 			peerID, reply.Term, rf.currentTerm)

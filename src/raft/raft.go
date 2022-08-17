@@ -124,10 +124,14 @@ func (rf *Raft) commitIndex() int {
 	return int(atomic.LoadInt64(&rf.vCommitIndex))
 }
 
-func (rf *Raft) setCommitIndex(ci int) {
+func (rf *Raft) setCommitIndex(log *log.Logger, ci int) {
 	if ci > rf.commitIndex() {
+		log.Printf("Increase commitIndex to %d", ci)
+
 		atomic.StoreInt64(&rf.vCommitIndex, int64(ci))
 		rf.commitIndexCond.Broadcast()
+	} else {
+		log.Printf("commitIndex already increased %d > %d", rf.commitIndex(), ci)
 	}
 }
 
