@@ -190,9 +190,7 @@ func (rf *Raft) syncProcessReply(
 			rf.nextIndex[peerID] = index + 1
 		}
 
-		if rf.matchIndex[peerID] < index {
-			rf.updateMatchIndex(peerID, index)
-		}
+		rf.updateMatchIndex(peerID, index)
 
 		return syncProcessReplyReturnSucess
 	}

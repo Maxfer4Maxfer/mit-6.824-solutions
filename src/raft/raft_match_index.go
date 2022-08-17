@@ -1,10 +1,18 @@
 package raft
 
-import "sync"
+import (
+	"log"
+	"sync"
+)
 
 func (rf *Raft) updateMatchIndex(peerID int, index int) {
-	rf.matchIndex[peerID] = index
-	rf.matchIndexCond.Broadcast()
+	if rf.matchIndex[peerID] < index {
+		log.Printf("Update matchIndex for S%d %d -> %d",
+			peerID, rf.matchIndex[peerID], index)
+
+		rf.matchIndex[peerID] = index
+		rf.matchIndexCond.Broadcast()
+	}
 }
 
 func (rf *Raft) matchIndexHistogram() (map[int]int, int) {
@@ -65,6 +73,8 @@ func (rf *Raft) matchIndexProcessing() {
 				if hMatchIndex[N] < len(rf.peers)/2+1 {
 					continue
 				}
+
+				log.Printf("Found not committed index on server majority: %d", N)
 
 				rf.setCommitIndex(log, N)
 
