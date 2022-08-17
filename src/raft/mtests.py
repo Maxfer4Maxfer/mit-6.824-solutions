@@ -217,22 +217,41 @@ shortcut = {
 
 
 def run_tests(
-    tests: List[str],
-    sequential: bool                = typer.Option(False,  '--sequential',      '-s',    help='Run all test of each group in order'),
-    workers: int                    = typer.Option(8,      '--workers',         '-p',    help='Number of parallel tasks'),
-    iterations: int                 = typer.Option(10,     '--iter',            '-n',    help='Number of iterations to run'),
-    timeout: str                    = typer.Option("30s",  '--timeout',         '-t',    help='Timeout for each test'),
-    output: Optional[Path]          = typer.Option(None,   '--output',          '-o',    help='Output path to use'),
-    output_base_dir: Optional[Path] = typer.Option("logs", '--output-dir',      '-d',    help='Base output dir to use'),
-    verbose: int                    = typer.Option(0,      '--verbose',         '-v',    help='Verbosity level', count=True),
-    archive: bool                   = typer.Option(False,  '--archive',         '-a',    help='Save all logs intead of only failed ones'),
-    race: bool                      = typer.Option(False,  '--race/--no-race',  '-r/-R', help='Run with race checker'),
-    coverage: bool                  = typer.Option(False,  '--coverage',        '-c',    help='Output path for a total caverage raport'),
-    coverage_output: Optional[Path] = typer.Option(None,   '--coverage-output', '-co',   help='Special output for a total caverage report'),
-    loop: bool                      = typer.Option(False,  '--loop',            '-l',    help='Run continuously'),
-    growth: int                     = typer.Option(10,     '--growth',          '-g',    help='Growth ratio of iterations when using --loop'),
-    timing: bool                    = typer.Option(False,   '--timing',         '-t',    help='Report timing, only works on macOS'),
-):
+        tests: List[str],
+        sequential: bool = typer.Option(
+            False, '--sequential', '-s',
+            help='Run all test of each group in order'),
+        workers: int = typer.Option(
+            8, '--workers', '-p', help='Number of parallel tasks'),
+        iterations: int = typer.Option(
+            10, '--iter', '-n', help='Number of iterations to run'),
+        timeout: str = typer.Option(
+            "30s", '--timeout', '-t', help='Timeout for each test'),
+        output: Optional[Path] = typer.Option(
+            None, '--output', '-o', help='Output path to use'),
+        output_base_dir: Optional[Path] = typer.Option(
+            "logs", '--output-dir', '-d', help='Base output dir to use'),
+        verbose: int = typer.Option(
+            0, '--verbose', '-v', help='Verbosity level', count=True),
+        archive: bool = typer.Option(
+            False, '--archive', '-a',
+            help='Save all logs intead of only failed ones'),
+        race: bool = typer.Option(
+            False, '--race/--no-race', '-r/-R', help='Run with race checker'),
+        coverage: bool = typer.Option(
+            False, '--coverage', '-c',
+            help='Output path for a total caverage raport'),
+        coverage_output: Optional[Path] = typer.Option(
+            None, '--coverage-output', '-co',
+            help='Special output for a total caverage report'),
+        loop: bool = typer.Option(
+            False, '--loop', '-l', help='Run continuously'),
+        growth: int = typer.Option(
+            10, '--growth', '-g',
+            help='Growth ratio of iterations when using --loop'),
+        timing: bool = typer.Option(
+            False, '--timing', '-t',
+            help='Report timing, only works on macOS'),):
 
     if output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
