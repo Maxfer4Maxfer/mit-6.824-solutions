@@ -168,28 +168,18 @@ func isLeaderElectionActive(ctx context.Context) bool {
 
 func (rf *Raft) leaderElectionVotesCalculation(
 	log *log.Logger,
-	electionTerm int,
 	nVotedFor int,
 	nVoted int,
 ) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if electionTerm < rf.currentTerm {
-		log.Printf("Current term is higher since election started %d < %d",
-			electionTerm, rf.currentTerm)
-
-		rf.leaderElection.StopLeaderElection()
-
-		return
-	}
-
 	log.Printf("(%d/%d) voted, %d for, %d against",
 		nVoted, len(rf.peers), nVotedFor, nVoted-nVotedFor)
 
 	if nVotedFor > len(rf.peers)/2 || nVoted == len(rf.peers) {
 		if nVotedFor > len(rf.peers)/2 {
-			log.Printf("New leader T:%d", electionTerm)
+			log.Printf("New leader T:%d", rf.currentTerm)
 
 			for i := range rf.peers {
 				log.Printf("Set nextIndex for S%d to %d", i, len(rf.log))
@@ -253,7 +243,7 @@ func (rf *Raft) leaderElectionStart(ctx context.Context, correlationID string) {
 		nVotedFor += result
 		nVoted++
 
-		rf.leaderElectionVotesCalculation(log, args.Term, nVotedFor, nVoted)
+		rf.leaderElectionVotesCalculation(log, nVotedFor, nVoted)
 	}
 }
 
