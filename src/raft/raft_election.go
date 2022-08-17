@@ -14,12 +14,12 @@ type leaderElectionEngine struct {
 	stopTickerCh       chan struct{}
 	resetTickerCh      chan struct{}
 	electionCancelFunc context.CancelFunc
-	leaderElectionFunc func(context.Context)
+	leaderElectionFunc func(ctx context.Context, correlationID string)
 }
 
 func initLeaderElectionEngine(
 	logger *log.Logger,
-	leaderElectionFunc func(context.Context),
+	leaderElectionFunc func(context.Context, string),
 ) *leaderElectionEngine {
 	lee := &leaderElectionEngine{
 		log:                extendLoggerWithTopic(logger, leaderElectionLogTopic),
@@ -65,7 +65,10 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 
 	go func() {
 		for range ticker.C {
-			log.Printf("Did not see a leader to much")
+			correlationID := CorrelationID()
+			llog := extendLoggerWithCorrelationID(log, correlationID)
+
+			llog.Printf("Did not see a leader to much")
 
 			lee.StopLeaderElection()
 
@@ -75,7 +78,7 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 			lee.electionCancelFunc = cancel
 			lee.mu.Unlock()
 
-			go lee.leaderElectionFunc(ctx)
+			go lee.leaderElectionFunc(ctx, correlationID)
 
 			electionTimeoutCh <- time.Duration(rand.Int63n(max-min) + min)
 		}
@@ -204,8 +207,7 @@ func (rf *Raft) leaderElectionVotesCalculation(
 	}
 }
 
-func (rf *Raft) leaderElectionStart(ctx context.Context) {
-	correlationID := CorrelationID()
+func (rf *Raft) leaderElectionStart(ctx context.Context, correlationID string) {
 	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
 	log = extendLoggerWithCorrelationID(log, correlationID)
 
