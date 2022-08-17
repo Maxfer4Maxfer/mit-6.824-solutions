@@ -21,9 +21,20 @@ func (rf *Raft) startProcessAnswers(
 		log.Printf("(%d/%d) answers", cAnswers, len(rf.peers))
 
 		if cAnswers == len(rf.peers)/2+1 {
-			log.Printf("increasing commitIndex")
+			log.Printf("try increase commitIndex to %d", index)
 
-			rf.setCommitIndex(index)
+			rf.mu.Lock()
+			differentTerm := rf.log[index].Term != rf.currentTerm
+			rf.mu.Unlock()
+
+			if differentTerm {
+				log.Printf("Previous term detected")
+				done = true
+
+				continue
+			}
+
+			rf.setCommitIndex(log, index)
 
 			done = true
 		}
