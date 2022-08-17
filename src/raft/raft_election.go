@@ -112,10 +112,11 @@ func (rf *Raft) leaderElectionSendRequestVote(
 		return
 	}
 
-	log.Printf("RequestVote reply from S%d T:%d", peerID, args.Term)
+	log.Printf("<- S%d ET:%d {T:%d VG:%v}",
+		peerID, args.Term, reply.Term, reply.VoteGranted)
 
 	rf.mu.Lock()
-	ok := rf.processIncomingTerm(log, peerID, reply.Term)
+	ok := rf.processIncomingTerm(args.CorrelationID, log, peerID, reply.Term)
 	rf.mu.Unlock()
 
 	if ok && reply.VoteGranted {
@@ -221,6 +222,8 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 	rf.currentTerm++
 	rf.votedFor = rf.me
 
+	rf.persist(correlationID)
+
 	log.Printf("Become a condidate and increase term to %d", rf.currentTerm)
 
 	args := &RequestVoteArgs{
@@ -267,7 +270,7 @@ func (rf *Raft) RequestVote(
 	log.Printf("Current State: {T:%d, LLI:%d, LLT:%d}",
 		rf.currentTerm, len(rf.log)-1, rf.log[len(rf.log)-1].Term)
 
-	rf.processIncomingTerm(log, args.CandidateID, args.Term)
+	rf.processIncomingTerm(args.CorrelationID, log, args.CandidateID, args.Term)
 
 	reply.VoteGranted = false
 	reply.Term = rf.currentTerm
@@ -289,6 +292,7 @@ func (rf *Raft) RequestVote(
 	default:
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateID
+		rf.persist(args.CorrelationID)
 		rf.leaderElection.ResetTicker()
 		log.Printf("Voted for %d ", args.CandidateID)
 	}

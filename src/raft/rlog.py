@@ -19,7 +19,7 @@ TOPICS = {
     "START": "#398280",
     "APPLY": "#98719f",
     "MATCH": "#d08341",
-    "SNAP": "#FD971F",
+    "PRSST": "#FD971F",
     "DROP": "#ff615c",
     "CLNT": "#00813c",
     "TEST": "#fe2c79",

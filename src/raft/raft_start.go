@@ -74,6 +74,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	rf.log = append(rf.log, LogEntry{rf.currentTerm, command})
+	rf.persist(correlationID)
 	index := len(rf.log) - 1
 	rf.mu.Unlock()
 

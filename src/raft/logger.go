@@ -8,14 +8,15 @@ import (
 type logTopic string
 
 const (
-	commonLogTopic         logTopic = "COMMON"
-	leaderElectionLogTopic logTopic = "ELECT"
-	tickerLogTopic         logTopic = "TICKR"
-	applyLogTopic          logTopic = "APPLY"
-	matchIndexLogTopic     logTopic = "MATCH"
-	heartbeatingLogTopic   logTopic = "HRTBT"
-	startLogTopic          logTopic = "START"
 	appendEntriesLogTopic  logTopic = "APPND"
+	applyLogTopic          logTopic = "APPLY"
+	commonLogTopic         logTopic = "COMMON"
+	heartbeatingLogTopic   logTopic = "HRTBT"
+	leaderElectionLogTopic logTopic = "ELECT"
+	matchIndexLogTopic     logTopic = "MATCH"
+	persisterLogTopic      logTopic = "PRSST"
+	startLogTopic          logTopic = "START"
+	tickerLogTopic         logTopic = "TICKR"
 )
 
 func extendLoggerWithPrefix(l *log.Logger, pr string, d string) *log.Logger {
@@ -34,5 +35,9 @@ func extendLoggerWithTopic(l *log.Logger, pr logTopic) *log.Logger {
 }
 
 func extendLoggerWithCorrelationID(l *log.Logger, cID string) *log.Logger {
+	if cID == "" {
+		return l
+	}
+
 	return extendLoggerWithPrefix(l, cID, "_")
 }

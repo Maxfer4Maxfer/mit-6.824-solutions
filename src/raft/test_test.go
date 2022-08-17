@@ -780,6 +780,7 @@ func TestPersist12C(t *testing.T) {
 	cfg.one(11, servers, true)
 
 	// crash and re-start all
+	fmt.Printf("Test: crash and re-start all\n")
 	for i := 0; i < servers; i++ {
 		cfg.start1(i, cfg.applier)
 	}
@@ -791,6 +792,7 @@ func TestPersist12C(t *testing.T) {
 	cfg.one(12, servers, true)
 
 	leader1 := cfg.checkOneLeader()
+	fmt.Printf("Test: renew leader1 S%d\n", leader1)
 	cfg.disconnect(leader1)
 	cfg.start1(leader1, cfg.applier)
 	cfg.connect(leader1)
@@ -798,6 +800,7 @@ func TestPersist12C(t *testing.T) {
 	cfg.one(13, servers, true)
 
 	leader2 := cfg.checkOneLeader()
+	fmt.Printf("Test: renew leader2 S%d\n", leader2)
 	cfg.disconnect(leader2)
 	cfg.one(14, servers-1, true)
 	cfg.start1(leader2, cfg.applier)
@@ -806,6 +809,7 @@ func TestPersist12C(t *testing.T) {
 	cfg.wait(4, servers, -1) // wait for leader2 to join before killing i3
 
 	i3 := (cfg.checkOneLeader() + 1) % servers
+	fmt.Printf("Test: renew S%d\n", i3)
 	cfg.disconnect(i3)
 	cfg.one(15, servers-1, true)
 	cfg.start1(i3, cfg.applier)

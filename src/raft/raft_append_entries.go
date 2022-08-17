@@ -18,7 +18,7 @@ func (rf *Raft) AppendEntries(
 
 	reply.Term = rf.currentTerm
 
-	rf.processIncomingTerm(log, args.LeaderID, args.Term)
+	rf.processIncomingTerm(args.CorrelationID, log, args.LeaderID, args.Term)
 
 	pass := rf.appendEntriesCheckArgs(log, args)
 	if !pass {
@@ -110,6 +110,7 @@ func (rf *Raft) appendEntriesProcessIncomingEntries(
 	if add {
 		log.Printf("Append [%d:]", index)
 		rf.log = append(rf.log, args.Entries[index:]...)
+		rf.persist(args.CorrelationID)
 	} else {
 		log.Printf("No new entries")
 	}
@@ -173,6 +174,8 @@ func (rf *Raft) syncProcessReply(
 
 		rf.votedFor = -1
 		rf.currentTerm = reply.Term
+
+		rf.persist(args.CorrelationID)
 
 		return syncProcessReplyReturnFailed
 
