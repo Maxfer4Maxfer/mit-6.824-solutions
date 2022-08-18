@@ -117,7 +117,17 @@ func (a *AppendEntriesArgs) DeepCopy() *AppendEntriesArgs {
 }
 
 type AppendEntriesReply struct {
-	Term int // currentTerm, for leader to update itself
+	// currentTerm, for leader to update itself
+	Term int
+
+	// equal [len(log)] if follower does not have prevLogIndex
+	// otherwise returned with ...
+	ConflictIndex int
+
+	// equal -1 if follower does not have prevLogIndex
+	// otherwise returned with ...
+	ConflictTerm int
+
 	// true if follower contained entry matching prevLogIndex and prevLogTerm
 	Success bool
 }

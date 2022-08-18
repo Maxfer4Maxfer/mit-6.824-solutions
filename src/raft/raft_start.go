@@ -29,6 +29,7 @@ func (rf *Raft) startProcessAnswers(
 
 			if differentTerm {
 				log.Printf("Previous term detected")
+
 				done = true
 
 				continue

@@ -14,16 +14,14 @@ func (rf *Raft) AppendEntries(
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	log.Printf("Current state: {T:%d LC:%d}", rf.currentTerm, rf.commitIndex())
+	log.Printf("Current state: {T:%d LC:%d len(log):%d}",
+		rf.currentTerm, rf.commitIndex(), len(rf.log))
 
 	reply.Term = rf.currentTerm
 
 	rf.processIncomingTerm(args.CorrelationID, log, args.LeaderID, args.Term)
 
-	pass := rf.appendEntriesCheckArgs(log, args)
-	if !pass {
-		reply.Success = false
-
+	if ok := rf.appendEntriesCheckArgs(log, args, reply); !ok {
 		return
 	}
 
@@ -50,11 +48,13 @@ func (rf *Raft) appendEntriesCreateLogger(args *AppendEntriesArgs) *log.Logger {
 }
 
 func (rf *Raft) appendEntriesCheckArgs(
-	log *log.Logger, args *AppendEntriesArgs,
+	log *log.Logger, args *AppendEntriesArgs, reply *AppendEntriesReply,
 ) bool {
 	switch {
 	case args.Term < rf.currentTerm:
 		log.Printf("Incoming term smaller %d < %d", args.Term, rf.currentTerm)
+
+		reply.Success = false
 
 		return false
 	case len(rf.log)-1 < args.PrevLogIndex:
@@ -62,12 +62,30 @@ func (rf *Raft) appendEntriesCheckArgs(
 
 		rf.leaderElection.ResetTicker()
 
+		reply.ConflictIndex = len(rf.log) - 1
+		reply.ConflictTerm = -1
+		reply.Success = false
+
 		return false
 	case rf.log[args.PrevLogIndex].Term != args.PrevLogTerm:
 		log.Printf("Log discrepancy %d != %d",
 			rf.log[args.PrevLogIndex].Term, args.PrevLogTerm)
 
 		rf.leaderElection.ResetTicker()
+
+		reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
+
+		for i := args.PrevLogIndex - 1; i > 0; i-- {
+			if rf.log[i].Term == reply.ConflictTerm {
+				continue
+			}
+
+			reply.ConflictIndex = i + 1
+
+			break
+		}
+
+		reply.Success = false
 
 		return false
 	}
@@ -150,7 +168,8 @@ func (rf *Raft) syncProcessReply(
 	reply *AppendEntriesReply,
 	index int,
 ) syncProcessReplyReturn {
-	log.Printf("<- S%d {T:%d S:%v}", peerID, reply.Term, reply.Success)
+	log.Printf("<- S%d {T:%d S:%v CI:%d CT:%d}",
+		peerID, reply.Term, reply.Success, reply.ConflictIndex, reply.ConflictTerm)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -178,11 +197,38 @@ func (rf *Raft) syncProcessReply(
 		rf.persist(args.CorrelationID)
 
 		return syncProcessReplyReturnFailed
-
-	case !reply.Success:
-		if rf.nextIndex[peerID] >= args.PrevLogIndex+1 {
-			rf.nextIndex[peerID]--
+	// shorter follower's log
+	case !reply.Success && reply.ConflictTerm == -1:
+		if reply.ConflictIndex == 0 {
+			rf.nextIndex[peerID] = 1
+		} else {
+			rf.nextIndex[peerID] = reply.ConflictIndex
 		}
+
+		log.Printf("nextIndex[%d] = %d", peerID, reply.ConflictIndex)
+
+		return syncProcessReplyReturnRetry
+	case !reply.Success && reply.ConflictTerm != -1:
+		found := false
+
+		for i := args.PrevLogIndex - 1; i > 0; i-- {
+			if rf.log[i].Term == reply.ConflictTerm {
+				rf.nextIndex[peerID] = i + 1
+				found = true
+
+				break
+			}
+
+			if rf.log[i].Term < reply.ConflictTerm {
+				break
+			}
+		}
+
+		if !found {
+			rf.nextIndex[peerID] = reply.ConflictIndex
+		}
+
+		log.Printf("nextIndex[%d] = %d", peerID, rf.nextIndex[peerID])
 
 		return syncProcessReplyReturnRetry
 	default:
