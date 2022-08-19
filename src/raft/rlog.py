@@ -52,7 +52,9 @@ def main(
             None, "--just", "-j", callback=list_topics),
         warning: bool = typer.Option(
             False, '--warning/--no-warning', '-w',
-            help='Include messages with WRN'),):
+            help='Include messages with WRN'),
+        only_correlationID: Optional[str] = typer.Option( 
+            None, "--correlationid", "-cid"),):
     topics = list(TOPICS)
 
     # We can take input from a stdin (pipes) or from a file
@@ -98,6 +100,12 @@ def main(
                 continue
 
             msg = " ".join(msg)
+
+            if only_correlationID:
+                if len(correlationID) == 0:
+                    continue
+                if only_correlationID != correlationID[0]:
+                    continue
 
             if len(correlationID) == 1:
                 msg = "[" + correlationID[0] + "] " + msg
