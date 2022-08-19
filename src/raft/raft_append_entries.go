@@ -14,8 +14,8 @@ func (rf *Raft) AppendEntries(
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	log.Printf("Current state: {T:%d LC:%d len(log):%d}",
-		rf.currentTerm, rf.commitIndex(), len(rf.log))
+	log.Printf("Current state: {T:%d LC:%d LI:%d}",
+		rf.currentTerm, rf.commitIndex(), rf.log.LastIndex())
 
 	reply.Term = rf.currentTerm
 
@@ -57,26 +57,26 @@ func (rf *Raft) appendEntriesCheckArgs(
 		reply.Success = false
 
 		return false
-	case len(rf.log)-1 < args.PrevLogIndex:
-		log.Printf("Smaller log size %d < %d", len(rf.log)-1, args.PrevLogIndex)
+	case rf.log.LastIndex() < args.PrevLogIndex:
+		log.Printf("log is smaller %d < %d", rf.log.LastIndex(), args.PrevLogIndex)
 
 		rf.leaderElection.ResetTicker()
 
-		reply.ConflictIndex = len(rf.log) - 1
+		reply.ConflictIndex = rf.log.LastIndex()
 		reply.ConflictTerm = -1
 		reply.Success = false
 
 		return false
-	case rf.log[args.PrevLogIndex].Term != args.PrevLogTerm:
+	case rf.Log(args.PrevLogIndex).Term != args.PrevLogTerm:
 		log.Printf("Log discrepancy %d != %d",
-			rf.log[args.PrevLogIndex].Term, args.PrevLogTerm)
+			rf.Log(args.PrevLogIndex).Term, args.PrevLogTerm)
 
 		rf.leaderElection.ResetTicker()
 
-		reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
+		reply.ConflictTerm = rf.Log(args.PrevLogIndex).Term
 
 		for i := args.PrevLogIndex - 1; i > 0; i-- {
-			if rf.log[i].Term == reply.ConflictTerm {
+			if rf.Log(i).Term == reply.ConflictTerm {
 				continue
 			}
 
@@ -105,7 +105,7 @@ func (rf *Raft) appendEntriesProcessIncomingEntries(
 
 	// shrink local log
 	for i := range args.Entries {
-		if args.PrevLogIndex+(i+1) > len(rf.log)-1 {
+		if args.PrevLogIndex+(i+1) > rf.log.LastIndex() {
 			index = i
 			add = true
 
@@ -114,11 +114,12 @@ func (rf *Raft) appendEntriesProcessIncomingEntries(
 			break
 		}
 
-		if rf.log[args.PrevLogIndex+(i+1)].Term != args.Entries[i].Term {
-			log.Printf("Shrink local log [:%d] len(rf.log): %d",
-				args.PrevLogIndex+(i+1), len(rf.log))
+		if rf.Log(args.PrevLogIndex+(i+1)).Term != args.Entries[i].Term {
+			log.Printf("Shrink local log [:%d] LI: %d",
+				args.PrevLogIndex+(i+1), rf.log.LastIndex())
 
-			rf.log = rf.log[:args.PrevLogIndex+(i+1)]
+			rf.log.RightShrink(args.PrevLogIndex + (i + 1))
+
 			add = true
 
 			break
@@ -127,7 +128,7 @@ func (rf *Raft) appendEntriesProcessIncomingEntries(
 
 	if add {
 		log.Printf("Append [%d:]", index)
-		rf.log = append(rf.log, args.Entries[index:]...)
+		rf.log.Append(args.Entries[index:]...)
 		rf.persist(args.CorrelationID)
 	} else {
 		log.Printf("No new entries")
@@ -146,8 +147,8 @@ func (rf *Raft) appendEntriesProcessLeaderCommit(
 
 	min := args.LeaderCommit
 
-	if len(args.Entries) != 0 && args.LeaderCommit > len(rf.log)-1 {
-		min = len(rf.log) - 1
+	if len(args.Entries) != 0 && args.LeaderCommit > rf.log.LastIndex() {
+		min = rf.log.LastIndex()
 	}
 
 	rf.setCommitIndex(log, min)
@@ -212,14 +213,14 @@ func (rf *Raft) syncProcessReply(
 		found := false
 
 		for i := args.PrevLogIndex - 1; i > 0; i-- {
-			if rf.log[i].Term == reply.ConflictTerm {
+			if rf.Log(i).Term == reply.ConflictTerm {
 				rf.nextIndex[peerID] = i + 1
 				found = true
 
 				break
 			}
 
-			if rf.log[i].Term < reply.ConflictTerm {
+			if rf.Log(i).Term < reply.ConflictTerm {
 				break
 			}
 		}
@@ -251,11 +252,13 @@ func (rf *Raft) sync(
 	reply := &AppendEntriesReply{}
 
 	for {
+		rf.mu.Lock()
+
 		if !rf.heartbeats.IsSendingInProgress() {
+			rf.mu.Unlock()
+
 			return false
 		}
-
-		rf.mu.Lock()
 
 		if rf.nextIndex[peerID] > index+1 {
 			log.Printf("S%d already updated by someone else", peerID)
@@ -265,9 +268,8 @@ func (rf *Raft) sync(
 		}
 
 		args.PrevLogIndex = rf.nextIndex[peerID] - 1
-		args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
-		args.Entries = append(
-			[]LogEntry(nil), rf.log[rf.nextIndex[peerID]:index+1]...)
+		args.PrevLogTerm = rf.Log(args.PrevLogIndex).Term
+		args.Entries = rf.log.Frame(rf.nextIndex[peerID], index+1)
 
 		rf.mu.Unlock()
 

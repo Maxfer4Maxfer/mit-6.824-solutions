@@ -182,8 +182,8 @@ func (rf *Raft) leaderElectionVotesCalculation(
 			log.Printf("New leader T:%d", rf.currentTerm)
 
 			for i := range rf.peers {
-				log.Printf("Set nextIndex for S%d to %d", i, len(rf.log))
-				rf.nextIndex[i] = len(rf.log)
+				log.Printf("Set nextIndex for S%d to %d", i, rf.log.LastIndex()+1)
+				rf.nextIndex[i] = rf.log.LastIndex() + 1
 				rf.matchIndex[i] = 0
 			}
 
@@ -222,8 +222,8 @@ func (rf *Raft) leaderElectionStart(ctx context.Context, correlationID string) {
 		CorrelationID: correlationID,
 		Term:          rf.currentTerm,
 		CandidateID:   rf.me,
-		LastLogIndex:  len(rf.log) - 1,
-		LastLogTerm:   rf.log[len(rf.log)-1].Term,
+		LastLogIndex:  rf.log.LastIndex(),
+		LastLogTerm:   rf.Log(rf.log.LastIndex()).Term,
 	}
 
 	rf.mu.Unlock()
@@ -260,7 +260,7 @@ func (rf *Raft) RequestVote(
 	defer rf.mu.Unlock()
 
 	log.Printf("Current State: {T:%d, LLI:%d, LLT:%d}",
-		rf.currentTerm, len(rf.log)-1, rf.log[len(rf.log)-1].Term)
+		rf.currentTerm, rf.log.LastIndex(), rf.Log(rf.log.LastIndex()).Term)
 
 	rf.processIncomingTerm(args.CorrelationID, log, args.CandidateID, args.Term)
 
@@ -275,12 +275,12 @@ func (rf *Raft) RequestVote(
 	case rf.votedFor == args.CandidateID:
 		log.Printf("Already voted for incoming candidate %d", rf.votedFor)
 	// candidate’s log is at least as up-to-date as receiver’s log
-	case rf.log[len(rf.log)-1].Term > args.LastLogTerm:
+	case rf.Log(rf.log.LastIndex()).Term > args.LastLogTerm:
 		log.Printf("Has more up-to-date log term %d > %d",
-			rf.log[len(rf.log)-1].Term, args.LastLogTerm)
-	case rf.log[len(rf.log)-1].Term == args.LastLogTerm &&
-		len(rf.log)-1 > args.LastLogIndex:
-		log.Printf("Has longer log %d > %d", len(rf.log)-1, args.LastLogIndex)
+			rf.Log(rf.log.LastIndex()).Term, args.LastLogTerm)
+	case rf.Log(rf.log.LastIndex()).Term == args.LastLogTerm &&
+		rf.log.LastIndex() > args.LastLogIndex:
+		log.Printf("Has longer log %d > %d", rf.log.LastIndex(), args.LastLogIndex)
 	default:
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateID

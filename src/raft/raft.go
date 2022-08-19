@@ -58,18 +58,6 @@ type ApplyMsg struct {
 	Snapshot      []byte
 }
 
-type LogEntry struct {
-	Term    int
-	Command interface{}
-}
-
-func (le *LogEntry) DeepCopy() *LogEntry {
-	return &LogEntry{
-		Term:    le.Term,
-		Command: le.Command,
-	}
-}
-
 type Raft struct {
 	mu        sync.Mutex // Lock to protect shared access to this peer's state
 	logger    *log.Logger
@@ -96,9 +84,8 @@ type Raft struct {
 	// candidateId that received vote in current term (or -1 if none)
 	votedFor int
 
-	// log entries; each entry contains command for state machine,
-	// and term when entry was received by leader (first index is 1)
-	log []LogEntry
+	// Raft log
+	log *RLog
 
 	// index of highest log entry known to be committed
 	// initialized to 0, intcreases monotonically
@@ -118,6 +105,11 @@ type Raft struct {
 	// (initialized to 0, increases monotonically)
 	matchIndex     []int
 	matchIndexCond *sync.Cond
+}
+
+// Log is a shurtcut for rf.log.Log(i).
+func (rf *Raft) Log(idx int) LogEntry {
+	return rf.log.Log(idx)
 }
 
 func (rf *Raft) commitIndex() int {
@@ -149,10 +141,10 @@ func (rf *Raft) applyLogProcessing() {
 			rf.mu.Lock()
 			for i := rf.lastApplied + 1; i <= rf.commitIndex(); i++ {
 				log.Printf("Apply index: %d, term: %d, command %v",
-					i, rf.log[i].Term, rf.log[i].Command)
+					i, rf.Log(i).Term, rf.Log(i).Command)
 				rf.lastApplied++
 				rf.applyCh <- ApplyMsg{
-					Command:      rf.log[i].Command,
+					Command:      rf.Log(i).Command,
 					CommandValid: true,
 					CommandIndex: rf.lastApplied,
 				}
@@ -192,10 +184,11 @@ func (rf *Raft) persist(correlationID string) {
 
 	e.Encode(rf.currentTerm)
 	e.Encode(rf.votedFor)
-	e.Encode(rf.log)
+	e.Encode(rf.log.log)
+	e.Encode(rf.log.offset)
 
-	log.Printf("save CT:%d VF:%d len(log):%d",
-		rf.currentTerm, rf.votedFor, len(rf.log))
+	log.Printf("save CT:%d VF:%d OF:%d len(log):%d",
+		rf.currentTerm, rf.votedFor, rf.log.offset, len(rf.log.log)-1)
 
 	rf.persister.SaveRaftState(w.Bytes())
 }
@@ -215,6 +208,7 @@ func (rf *Raft) readPersist(data []byte) {
 		currentTerm int
 		votedFor    int
 		log         []LogEntry
+		offset      int
 	)
 
 	if d.Decode(&currentTerm) != nil {
@@ -229,11 +223,17 @@ func (rf *Raft) readPersist(data []byte) {
 		panic("log not found")
 	}
 
+	if d.Decode(&offset) != nil {
+		panic("offset not found")
+	}
+
 	rf.currentTerm = currentTerm
 	rf.votedFor = votedFor
-	rf.log = log
+	rf.log.log = log
+	rf.log.offset = offset
 
-	logger.Printf("load CT:%d VF:%d len(log):%d", currentTerm, votedFor, len(log))
+	logger.Printf("load CT:%d VF:%d OF:%d len(log):%d",
+		currentTerm, votedFor, offset, len(log)-1)
 }
 
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
@@ -265,7 +265,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
-	extendLoggerWithTopic(rf.logger, commonLogTopic)
+	log := extendLoggerWithTopic(rf.logger, commonLogTopic)
 	log.Printf("Received the KILL signal")
 
 	rf.heartbeats.StopSending()
@@ -321,10 +321,13 @@ func Make(
 		me:         me,
 		votedFor:   -1,
 		applyCh:    applyCh,
-		log:        []LogEntry{{0, ""}}, // need for first log index will be 1
+		log:        newRLog(),
 		nextIndex:  make([]int, len(peers)),
 		matchIndex: make([]int, len(peers)),
 	}
+
+	// need for first log index will be 1
+	rf.log.Append(LogEntry{0, ""})
 
 	// Your initialization code here (2A, 2B, 2C).
 	rf.logger = log.New(

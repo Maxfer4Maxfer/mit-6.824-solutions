@@ -24,7 +24,7 @@ func (rf *Raft) startProcessAnswers(
 			log.Printf("try increase commitIndex to %d", index)
 
 			rf.mu.Lock()
-			differentTerm := rf.log[index].Term != rf.currentTerm
+			differentTerm := rf.Log(index).Term != rf.currentTerm
 			rf.mu.Unlock()
 
 			if differentTerm {
@@ -85,9 +85,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		LeaderCommit:  rf.commitIndex(),
 	}
 
-	rf.log = append(rf.log, LogEntry{rf.currentTerm, command})
+	rf.log.Append(LogEntry{rf.currentTerm, command})
 	rf.persist(correlationID)
-	index := len(rf.log) - 1
+	index := rf.log.LastIndex()
 	rf.mu.Unlock()
 
 	log.Printf("append to index: %d", index)

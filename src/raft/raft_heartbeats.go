@@ -80,7 +80,7 @@ func (rf *Raft) sendHeartbeats(correlationID string) {
 		LeaderCommit:  rf.commitIndex(),
 	}
 
-	index := len(rf.log) - 1
+	index := rf.log.LastIndex()
 	rf.mu.Unlock()
 
 	log.Printf("Hearbeats for term %d", args.Term)

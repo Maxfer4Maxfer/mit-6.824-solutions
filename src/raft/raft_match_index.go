@@ -66,7 +66,7 @@ func (rf *Raft) matchIndexProcessing() {
 
 			rf.mu.Lock()
 			for N := max; N > rf.commitIndex(); N-- {
-				if rf.log[N].Term != rf.commitIndex() {
+				if rf.Log(N).Term != rf.commitIndex() {
 					continue
 				}
 
