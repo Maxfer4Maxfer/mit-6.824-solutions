@@ -45,7 +45,7 @@ import (
 // go test -race -run TestUnreliableChurn2C | tee log.txt
 
 // go test -race -run 2D | tee log.txt
-// go test -race -run TestSnapshotyiwBasic2D | tee log.txt
+// go test -race -run TestSnapshotBasic2D | tee log.txt
 // go test -race -run TestSnapshotInstall2D | tee log.txt
 // go test -race -run TestSnapshotInstallUnreliable2D | tee log.txt
 // go test -race -run TestSnapshotInstallCrash2D | tee log.txt
@@ -1221,7 +1221,11 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 	cfg.one(rand.Int(), servers, true)
 	leader1 := cfg.checkOneLeader()
 
+	fmt.Printf("Test: leader S%d\n", leader1)
+
 	for i := 0; i < iters; i++ {
+		fmt.Printf("Test: iteraction %d/%d\n", i+1, iters)
+
 		victim := (leader1 + 1) % servers
 		sender := leader1
 		if i%3 == 1 {
@@ -1230,19 +1234,24 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 		}
 
 		if disconnect {
+			fmt.Printf("Test: disconnect S%d\n", victim)
 			cfg.disconnect(victim)
 			cfg.one(rand.Int(), servers-1, true)
 		}
 		if crash {
+			fmt.Printf("Test: crash S%d\n", victim)
 			cfg.crash1(victim)
 			cfg.one(rand.Int(), servers-1, true)
 		}
 
 		// perhaps send enough to get a snapshot
 		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
+		fmt.Printf("Test: shot %d Start calls\n", nn)
 		for i := 0; i < nn; i++ {
 			cfg.rafts[sender].Start(rand.Int())
 		}
+
+		fmt.Printf("Test: final call\n")
 
 		// let applier threads catch up with the Start()'s
 		if disconnect == false && crash == false {
@@ -1260,12 +1269,15 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 		if disconnect {
 			// reconnect a follower, who maybe behind and
 			// needs to rceive a snapshot to catch up.
+			fmt.Printf("Test: connect S%d\n", victim)
 			cfg.connect(victim)
 			cfg.one(rand.Int(), servers, true)
 			leader1 = cfg.checkOneLeader()
+			fmt.Printf("Test: leader S%d", leader1)
 		}
 		if crash {
 			cfg.start1(victim, cfg.applierSnap)
+			fmt.Printf("Test: connect S%d\n", victim)
 			cfg.connect(victim)
 			cfg.one(rand.Int(), servers, true)
 			leader1 = cfg.checkOneLeader()
@@ -1274,7 +1286,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 	cfg.end()
 }
 
-func TestSnapshotyiwBasic2D(t *testing.T) {
+func TestSnapshotBasic2D(t *testing.T) {
 	snapcommon(t, "Test (2D): snapshots basic", false, true, false)
 }
 

@@ -8,15 +8,17 @@ import (
 type logTopic string
 
 const (
-	appendEntriesLogTopic  logTopic = "APPND"
-	applyLogTopic          logTopic = "APPLY"
-	commonLogTopic         logTopic = "COMMON"
-	heartbeatingLogTopic   logTopic = "HRTBT"
-	leaderElectionLogTopic logTopic = "ELECT"
-	matchIndexLogTopic     logTopic = "MATCH"
-	persisterLogTopic      logTopic = "PRSST"
-	startLogTopic          logTopic = "START"
-	tickerLogTopic         logTopic = "TICKR"
+	appendEntriesLogTopic   logTopic = "APPND"
+	applyLogTopic           logTopic = "APPLY"
+	commonLogTopic          logTopic = "COMMON"
+	heartbeatingLogTopic    logTopic = "HRTBT"
+	installSnapshotLogTopic logTopic = "ISNAP"
+	leaderElectionLogTopic  logTopic = "ELECT"
+	matchIndexLogTopic      logTopic = "MATCH"
+	persisterLogTopic       logTopic = "PRSST"
+	snapshotLogTopic        logTopic = "SNAPS"
+	startLogTopic           logTopic = "START"
+	tickerLogTopic          logTopic = "TICKR"
 )
 
 func extendLoggerWithPrefix(l *log.Logger, pr string, d string) *log.Logger {

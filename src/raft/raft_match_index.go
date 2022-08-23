@@ -1,12 +1,14 @@
 package raft
 
 import (
-	"log"
 	"sync"
 )
 
-func (rf *Raft) updateMatchIndex(peerID int, index int) {
+func (rf *Raft) updateMatchIndex(correlationID string, peerID int, index int) {
 	if rf.matchIndex[peerID] < index {
+		log := extendLoggerWithTopic(rf.logger, matchIndexLogTopic)
+		log = extendLoggerWithCorrelationID(log, correlationID)
+
 		log.Printf("Update matchIndex for S%d %d -> %d",
 			peerID, rf.matchIndex[peerID], index)
 
@@ -19,8 +21,6 @@ func (rf *Raft) matchIndexHistogram() (map[int]int, int) {
 	cMatchIndex := make(map[int]int) // [idx]count
 	max := 0
 
-	rf.mu.Lock()
-
 	for _, idx := range rf.matchIndex {
 		cMatchIndex[idx]++
 
@@ -28,8 +28,6 @@ func (rf *Raft) matchIndexHistogram() (map[int]int, int) {
 			max = idx
 		}
 	}
-
-	rf.mu.Unlock()
 
 	hMatchIndex := make(map[int]int, max) // [idx]count
 
@@ -58,15 +56,20 @@ func (rf *Raft) matchIndexProcessing() {
 		for {
 			rf.matchIndexCond.Wait()
 
+			rf.mu.Lock()
 			if !rf.heartbeats.IsSendingInProgress() {
+				rf.mu.Unlock()
 				continue
 			}
 
 			hMatchIndex, max := rf.matchIndexHistogram()
 
-			rf.mu.Lock()
 			for N := max; N > rf.commitIndex(); N-- {
-				if rf.Log(N).Term != rf.commitIndex() {
+				if N <= rf.log.lastIncludedIndex {
+					continue
+				}
+
+				if rf.log.Term(N) != rf.commitIndex() {
 					continue
 				}
 

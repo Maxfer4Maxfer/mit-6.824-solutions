@@ -16,19 +16,40 @@ type RLog struct {
 	// log entries; each entry contains command for state machine,
 	// and term when entry was received by leader (first index is 1)
 	log []LogEntry
+
 	// first index number in the log
 	offset int
+
+	lastIncludedIndex int
+
+	lastIncludedTerm int
 }
 
 func newRLog() *RLog {
 	return &RLog{
-		log:    []LogEntry{},
-		offset: 0,
+		log:               []LogEntry{},
+		offset:            0,
+		lastIncludedIndex: 0,
+		lastIncludedTerm:  0,
 	}
 }
 
 func (rl *RLog) LastIndex() int {
 	return rl.offset + len(rl.log) - 1
+}
+
+func (rl *RLog) FirstIndex() int {
+	return rl.offset
+}
+
+func (rl *RLog) Term(idx int) int {
+	i := idx - rl.offset
+
+	if i == -1 {
+		return rl.lastIncludedTerm
+	}
+
+	return rl.log[idx-rl.offset].Term
 }
 
 func (rl *RLog) Log(idx int) LogEntry {
@@ -56,7 +77,7 @@ func (rl *RLog) LeftShrink(idx int) {
 		rl.log = rl.log[:0]
 	}
 
-	rl.offset += idx + 1
+	rl.offset = idx + 1
 }
 
 // LeftShrink delete record from the left.
@@ -66,5 +87,5 @@ func (rl *RLog) RightShrink(idx int) {
 }
 
 func (rl *RLog) Frame(from, to int) []LogEntry {
-	return append([]LogEntry(nil), rl.log[from+rl.offset:to+rl.offset]...)
+	return append([]LogEntry(nil), rl.log[from-rl.offset:to-rl.offset]...)
 }

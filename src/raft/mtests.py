@@ -206,7 +206,7 @@ shortcut = {
         "TestUnreliableChurn2C",
     ],
     '2D': [
-        "TestSnapshotyiwBasic2D",
+        "TestSnapshotBasic2D",
         "TestSnapshotInstall2D",
         "TestSnapshotInstallUnreliable2D",
         "TestSnapshotInstallCrash2D",

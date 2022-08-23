@@ -139,3 +139,42 @@ func (rf *Raft) sendAppendEntries(
 
 	return ok
 }
+
+type InstallSnapshotArgs struct {
+	// CorrelationsID is used to trace requests across multiple raft instance.
+	CorrelationID string
+
+	// leader’s term
+	Term int
+
+	// so follower can redirect clients
+	LeaderID int
+
+	// the snapshot replaces all entries up through and including this index
+	LastIncludedIndex int
+
+	// term of lastIncludedIndex
+	LastIncludedTerm int
+
+	// byte offset where chunk is positioned in the snapshot file
+	Offset int
+
+	// raw bytes of the snapshot chunk, starting at offset
+	Data []byte
+
+	// true if this is the last chunk
+	Done bool
+}
+
+type InstallSnapshotReply struct {
+	// currentTerm, for leader to update itself
+	Term int
+}
+
+func (rf *Raft) sendInstallSnapshot(
+	server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply,
+) bool {
+	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
+
+	return ok
+}

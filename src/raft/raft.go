@@ -34,7 +34,8 @@ const (
 	electionTimeoutLowerBoundary = 150 * time.Millisecond
 	// The tester requires that the leader send heartbeat RPCs
 	// no more than ten times per second.
-	broadcastTime = 110 * time.Millisecond
+	broadcastTime     = 110 * time.Millisecond
+	capacityOfApplyCh = 100
 )
 
 // as each Raft peer becomes aware that successive log entries are
@@ -72,7 +73,8 @@ type Raft struct {
 
 	// applyCh is a channel on which the
 	// tester or service expects Raft to send ApplyMsg messages.
-	applyCh chan ApplyMsg
+	applyCh    chan ApplyMsg
+	bufApplyCh chan ApplyMsg
 
 	leaderElection *leaderElectionEngine
 	heartbeats     *heartbeatsEngine
@@ -95,7 +97,7 @@ type Raft struct {
 
 	// index of highest log entry applied to state machine
 	// initialized to 0, intcreases monotonically
-	lastApplied int
+	vLastApplied int64
 
 	// for each server, index of the next log entry to send to that server
 	// (initialized to leader last log index + 1)
@@ -110,6 +112,18 @@ type Raft struct {
 // Log is a shurtcut for rf.log.Log(i).
 func (rf *Raft) Log(idx int) LogEntry {
 	return rf.log.Log(idx)
+}
+
+func (rf *Raft) lastApplied() int {
+	return int(atomic.LoadInt64(&rf.vLastApplied))
+}
+
+func (rf *Raft) setLastApplied(v int) {
+	atomic.StoreInt64(&rf.vLastApplied, int64(v))
+}
+
+func (rf *Raft) addToLastApplies(v int) {
+	atomic.AddInt64(&rf.vLastApplied, int64(v))
 }
 
 func (rf *Raft) commitIndex() int {
@@ -135,21 +149,70 @@ func (rf *Raft) applyLogProcessing() {
 	rf.commitIndexCond.L.Lock()
 
 	go func() {
+		for msg := range rf.bufApplyCh {
+			// always apply incomming Snapshot
+			switch {
+			case msg.CommandValid && msg.CommandIndex <= rf.lastApplied():
+				continue
+			case !msg.CommandValid && msg.SnapshotIndex <= rf.lastApplied():
+				continue
+			}
+
+			log.Printf("apply CI:%d", msg.CommandIndex)
+
+			rf.applyCh <- msg
+
+			switch {
+			case msg.CommandValid:
+				rf.setLastApplied(msg.CommandIndex)
+			case !msg.CommandValid:
+				rf.setLastApplied(msg.SnapshotIndex)
+			}
+
+			log.Printf("CI:%d applied", msg.CommandIndex)
+		}
+	}()
+
+	go func() {
 		for {
 			rf.commitIndexCond.Wait()
 
-			rf.mu.Lock()
-			for i := rf.lastApplied + 1; i <= rf.commitIndex(); i++ {
-				log.Printf("Apply index: %d, term: %d, command %v",
-					i, rf.Log(i).Term, rf.Log(i).Command)
-				rf.lastApplied++
-				rf.applyCh <- ApplyMsg{
-					Command:      rf.Log(i).Command,
-					CommandValid: true,
-					CommandIndex: rf.lastApplied,
+			log.Printf("Apply %d -> %d", rf.lastApplied()+1, rf.commitIndex())
+
+			for idx := rf.lastApplied() + 1; idx <= rf.commitIndex(); idx++ {
+				rf.mu.Lock()
+				if idx <= rf.log.lastIncludedIndex {
+					rf.mu.Unlock()
+
+					continue
+				}
+
+				command := rf.Log(idx).Command
+
+				log.Printf("-> applyCh {LII:%d LIT:%d command:%d}",
+					idx, rf.log.Term(idx), command)
+
+				rf.mu.Unlock()
+
+				applied := false
+				for {
+					if applied {
+						break
+					}
+
+					select {
+					case rf.bufApplyCh <- ApplyMsg{
+						Command:      command,
+						CommandValid: true,
+						CommandIndex: idx,
+					}:
+						applied = true
+					default:
+						log.Printf("WRN encrease capacity of buffered applyCh: %d",
+							capacityOfApplyCh)
+					}
 				}
 			}
-			rf.mu.Unlock()
 		}
 	}()
 }
@@ -236,23 +299,6 @@ func (rf *Raft) readPersist(data []byte) {
 		currentTerm, votedFor, offset, len(log)-1)
 }
 
-// A service wants to switch to snapshot.  Only do so if Raft hasn't
-// have more recent info since it communicate the snapshot on applyCh.
-func (rf *Raft) CondInstallSnapshot(
-	lastIncludedTerm int, lastIncludedIndex int, snapshot []byte,
-) bool {
-	// Your code here (2D).
-	return true
-}
-
-// the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (2D).
-}
-
 // the tester doesn't halt goroutines created by Raft after each test,
 // but it does call the Kill() method. your code can use killed() to
 // check whether Kill() has been called. the use of atomic avoids the
@@ -321,6 +367,7 @@ func Make(
 		me:         me,
 		votedFor:   -1,
 		applyCh:    applyCh,
+		bufApplyCh: make(chan ApplyMsg, capacityOfApplyCh),
 		log:        newRLog(),
 		nextIndex:  make([]int, len(peers)),
 		matchIndex: make([]int, len(peers)),

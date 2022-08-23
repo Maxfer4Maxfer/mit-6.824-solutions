@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"context"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,7 @@ func (hbe *heartbeatsEngine) StopSending() {
 	if atomic.LoadInt32(&hbe.run) == 1 {
 		hbe.log.Print("Stop sending heartbeats")
 		atomic.StoreInt32(&hbe.run, 0)
+		hbe.cond.Broadcast()
 	}
 }
 
@@ -54,16 +56,41 @@ func (hbe *heartbeatsEngine) IsSendingInProgress() bool {
 func (hbe *heartbeatsEngine) processing() {
 	hbe.log.Print("Start heartbeats engine")
 
+	ticker := func(ctx context.Context) {
+		ticker := time.NewTicker(broadcastTime)
+		defer ticker.Stop()
+
+		for ; true; <-ticker.C {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				correlationID := CorrelationID()
+				log := extendLoggerWithCorrelationID(hbe.log, correlationID)
+
+				log.Printf("Hearbeats timer is triggered")
+
+				go hbe.sendHeartbeatsFunc(correlationID)
+			}
+		}
+	}
+
 	hbe.cond.L.Lock()
+
+	var cancelf context.CancelFunc
 
 	for {
 		switch {
 		case atomic.LoadInt32(&hbe.run) == 0:
+			if cancelf != nil {
+				cancelf()
+			}
 			hbe.cond.Wait()
-		default:
-			hbe.sendHeartbeatsFunc(CorrelationID())
-
-			time.Sleep(broadcastTime)
+		case atomic.LoadInt32(&hbe.run) == 1:
+			ctx, cancel := context.WithCancel(context.Background())
+			go ticker(ctx)
+			cancelf = cancel
+			hbe.cond.Wait()
 		}
 	}
 }
@@ -82,8 +109,6 @@ func (rf *Raft) sendHeartbeats(correlationID string) {
 
 	index := rf.log.LastIndex()
 	rf.mu.Unlock()
-
-	log.Printf("Hearbeats for term %d", args.Term)
 
 	for peerID := range rf.peers {
 		if peerID == rf.me {

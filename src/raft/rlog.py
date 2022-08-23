@@ -19,10 +19,10 @@ TOPICS = {
     "START": "#398280",
     "APPLY": "#98719f",
     "MATCH": "#d08341",
-    "PRSST": "#FD971F",
-    "DROP": "#ff615c",
+    "SNAPS": "#FD971F",
+    "ISNAP": "#fe2c79",
+    "PRSST": "#ff615c",
     "CLNT": "#00813c",
-    "TEST": "#fe2c79",
     "INFO": "#ffffff",
     "WARN": "#d08341",
     "ERRO": "#fe2626",
@@ -53,7 +53,10 @@ def main(
         warning: bool = typer.Option(
             False, '--warning/--no-warning', '-w',
             help='Include messages with WRN'),
-        only_correlationID: Optional[str] = typer.Option( 
+        with_code_line: bool = typer.Option(
+            False, '--code-line/--no-code-line', '-cl',
+            help='Show code line'),
+        only_correlationID: Optional[str] = typer.Option(
             None, "--correlationid", "-cid"),):
     topics = list(TOPICS)
 
@@ -91,6 +94,9 @@ def main(
             # S5 ELECT 18:19:20.292541 raft.go:360: 6 peer voted against us
             peer, topic_cID, time, code_line, *msg = line.strip().split(" ")
 
+            if len(peer) != 2:
+                console.print(line, end="")
+
             # check that topic may has correlationID
             topic, *correlationID = topic_cID.strip().split("_")
 
@@ -115,7 +121,8 @@ def main(
                 color = TOPICS[topic]
                 msg = f"[{color}]{msg}[/{color}]"
 
-            # msg = msg + " (" + code_line[:-1] + ")"
+            if with_code_line:
+                msg = msg + " (" + code_line[:-1] + ")"
 
             # Single column printing. Always the case for debug stmts in tests
             if n_columns is None or topic == "TEST":

@@ -223,7 +223,7 @@ func (rf *Raft) leaderElectionStart(ctx context.Context, correlationID string) {
 		Term:          rf.currentTerm,
 		CandidateID:   rf.me,
 		LastLogIndex:  rf.log.LastIndex(),
-		LastLogTerm:   rf.Log(rf.log.LastIndex()).Term,
+		LastLogTerm:   rf.log.Term(rf.log.LastIndex()),
 	}
 
 	rf.mu.Unlock()
@@ -260,7 +260,7 @@ func (rf *Raft) RequestVote(
 	defer rf.mu.Unlock()
 
 	log.Printf("Current State: {T:%d, LLI:%d, LLT:%d}",
-		rf.currentTerm, rf.log.LastIndex(), rf.Log(rf.log.LastIndex()).Term)
+		rf.currentTerm, rf.log.LastIndex(), rf.log.Term(rf.log.LastIndex()))
 
 	rf.processIncomingTerm(args.CorrelationID, log, args.CandidateID, args.Term)
 
@@ -275,10 +275,10 @@ func (rf *Raft) RequestVote(
 	case rf.votedFor == args.CandidateID:
 		log.Printf("Already voted for incoming candidate %d", rf.votedFor)
 	// candidate’s log is at least as up-to-date as receiver’s log
-	case rf.Log(rf.log.LastIndex()).Term > args.LastLogTerm:
+	case rf.log.Term(rf.log.LastIndex()) > args.LastLogTerm:
 		log.Printf("Has more up-to-date log term %d > %d",
-			rf.Log(rf.log.LastIndex()).Term, args.LastLogTerm)
-	case rf.Log(rf.log.LastIndex()).Term == args.LastLogTerm &&
+			rf.log.Term(rf.log.LastIndex()), args.LastLogTerm)
+	case rf.log.Term(rf.log.LastIndex()) == args.LastLogTerm &&
 		rf.log.LastIndex() > args.LastLogIndex:
 		log.Printf("Has longer log %d > %d", rf.log.LastIndex(), args.LastLogIndex)
 	default:
