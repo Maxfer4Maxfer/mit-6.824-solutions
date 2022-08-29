@@ -1,13 +1,13 @@
 package raft
 
 import (
+	"context"
 	"sync"
 )
 
-func (rf *Raft) updateMatchIndex(correlationID string, peerID int, index int) {
+func (rf *Raft) updateMatchIndex(ctx context.Context, peerID int, index int) {
 	if rf.matchIndex[peerID] < index {
-		log := extendLoggerWithTopic(rf.logger, matchIndexLogTopic)
-		log = extendLoggerWithCorrelationID(log, correlationID)
+		log := extendLogger(ctx, rf.logger, matchIndexLogTopic)
 
 		log.Printf("Update matchIndex for S%d %d -> %d",
 			peerID, rf.matchIndex[peerID], index)
@@ -62,12 +62,11 @@ func (rf *Raft) matchIndexProcessing() {
 
 			if !rf.heartbeats.IsSendingInProgress() {
 				rf.mu.Unlock()
+
 				continue
 			}
 
 			hMatchIndex, max := rf.matchIndexHistogram()
-
-			log.Printf("Histogram:%+v", hMatchIndex)
 
 			for N := max; N > rf.commitIndex(); N-- {
 				if N <= rf.log.lastIncludedIndex {

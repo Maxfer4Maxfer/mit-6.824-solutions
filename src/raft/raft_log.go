@@ -43,9 +43,7 @@ func (rl *RLog) FirstIndex() int {
 }
 
 func (rl *RLog) Term(idx int) int {
-	i := idx - rl.offset
-
-	if i == -1 {
+	if idx-rl.offset == -1 {
 		return rl.lastIncludedTerm
 	}
 

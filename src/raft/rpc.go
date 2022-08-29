@@ -4,7 +4,7 @@ package raft
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// CorrelationsID is used to trace requests across multiple raft instance.
-	CorrelationID string
+	CorrelationID CorrelationID
 
 	// candidate’s term
 	Term int
@@ -74,7 +74,7 @@ func (rf *Raft) sendRequestVote(
 
 type AppendEntriesArgs struct {
 	// CorrelationsID is used to trace requests across multiple raft instance.
-	CorrelationID string
+	CorrelationID CorrelationID
 
 	// leader’s term
 	Term int
@@ -142,7 +142,7 @@ func (rf *Raft) sendAppendEntries(
 
 type InstallSnapshotArgs struct {
 	// CorrelationsID is used to trace requests across multiple raft instance.
-	CorrelationID string
+	CorrelationID CorrelationID
 
 	// leader’s term
 	Term int

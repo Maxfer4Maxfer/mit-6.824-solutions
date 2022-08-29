@@ -14,12 +14,12 @@ type leaderElectionEngine struct {
 	stopTickerCh       chan struct{}
 	resetTickerCh      chan struct{}
 	electionCancelFunc context.CancelFunc
-	leaderElectionFunc func(ctx context.Context, correlationID string)
+	leaderElectionFunc func(ctx context.Context)
 }
 
 func initLeaderElectionEngine(
 	logger *log.Logger,
-	leaderElectionFunc func(context.Context, string),
+	leaderElectionFunc func(context.Context),
 ) *leaderElectionEngine {
 	lee := &leaderElectionEngine{
 		log:                extendLoggerWithTopic(logger, leaderElectionLogTopic),
@@ -65,7 +65,7 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 
 	go func() {
 		for range ticker.C {
-			correlationID := CorrelationID()
+			correlationID := correlationID()
 			llog := extendLoggerWithCorrelationID(log, correlationID)
 
 			llog.Printf("Did not see a leader to much")
@@ -73,12 +73,13 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 			lee.StopLeaderElection()
 
 			ctx, cancel := context.WithCancel(context.Background())
+			ctx = addCorrelationID(ctx, correlationID)
 
 			lee.mu.Lock()
 			lee.electionCancelFunc = cancel
 			lee.mu.Unlock()
 
-			go lee.leaderElectionFunc(ctx, correlationID)
+			go lee.leaderElectionFunc(ctx)
 
 			electionTimeoutCh <- time.Duration(rand.Int63n(max-min) + min)
 		}
@@ -100,7 +101,8 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 }
 
 func (rf *Raft) leaderElectionSendRequestVote(
-	log *log.Logger, wg *sync.WaitGroup, args *RequestVoteArgs,
+	ctx context.Context, log *log.Logger,
+	wg *sync.WaitGroup, args *RequestVoteArgs,
 	peerID int, resultCh chan int,
 ) {
 	reply := &RequestVoteReply{}
@@ -119,7 +121,7 @@ func (rf *Raft) leaderElectionSendRequestVote(
 		peerID, args.Term, reply.Term, reply.VoteGranted)
 
 	rf.mu.Lock()
-	ok := rf.processIncomingTerm(args.CorrelationID, log, peerID, reply.Term)
+	ok := rf.processIncomingTerm(ctx, log, peerID, reply.Term)
 	rf.mu.Unlock()
 
 	if ok && reply.VoteGranted {
@@ -134,7 +136,7 @@ func (rf *Raft) leaderElectionSendRequestVote(
 }
 
 func (rf *Raft) leaderElectionSendRequestVotes(
-	log *log.Logger, args *RequestVoteArgs,
+	ctx context.Context, log *log.Logger, args *RequestVoteArgs,
 ) chan int {
 	resultCh := make(chan int) // 0 - votedFor; 1 - votedAgeinst
 	wg := &sync.WaitGroup{}
@@ -146,7 +148,7 @@ func (rf *Raft) leaderElectionSendRequestVotes(
 			continue
 		}
 
-		go rf.leaderElectionSendRequestVote(log, wg, args, peerID, resultCh)
+		go rf.leaderElectionSendRequestVote(ctx, log, wg, args, peerID, resultCh)
 	}
 
 	go func() {
@@ -197,9 +199,8 @@ func (rf *Raft) leaderElectionVotesCalculation(
 	}
 }
 
-func (rf *Raft) leaderElectionStart(ctx context.Context, correlationID string) {
-	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
-	log = extendLoggerWithCorrelationID(log, correlationID)
+func (rf *Raft) leaderElectionStart(ctx context.Context) {
+	log := extendLogger(ctx, rf.logger, leaderElectionLogTopic)
 
 	log.Printf("Starting new Leader election cycle")
 
@@ -214,12 +215,12 @@ func (rf *Raft) leaderElectionStart(ctx context.Context, correlationID string) {
 	rf.currentTerm++
 	rf.votedFor = rf.me
 
-	rf.persist(correlationID)
+	rf.persist(ctx)
 
 	log.Printf("Become a condidate and increase term to %d", rf.currentTerm)
 
 	args := &RequestVoteArgs{
-		CorrelationID: correlationID,
+		CorrelationID: getCorrelationID(ctx),
 		Term:          rf.currentTerm,
 		CandidateID:   rf.me,
 		LastLogIndex:  rf.log.LastIndex(),
@@ -231,7 +232,7 @@ func (rf *Raft) leaderElectionStart(ctx context.Context, correlationID string) {
 	nVoted := 1    // already voted for themselves
 	nVotedFor := 1 // already voted for themselves
 
-	resultCh := rf.leaderElectionSendRequestVotes(log, args.DeepCopy())
+	resultCh := rf.leaderElectionSendRequestVotes(ctx, log, args.DeepCopy())
 
 	for result := range resultCh {
 		if !isLeaderElectionActive(ctx) {
@@ -250,8 +251,8 @@ func (rf *Raft) leaderElectionStart(ctx context.Context, correlationID string) {
 func (rf *Raft) RequestVote(
 	args *RequestVoteArgs, reply *RequestVoteReply,
 ) {
-	log := extendLoggerWithTopic(rf.logger, leaderElectionLogTopic)
-	log = extendLoggerWithCorrelationID(log, args.CorrelationID)
+	ctx := addCorrelationID(context.Background(), args.CorrelationID)
+	log := extendLogger(ctx, rf.logger, leaderElectionLogTopic)
 
 	log.Printf("<- S%d {T:%d, LLI:%d, LLT:%d}",
 		args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm)
@@ -262,7 +263,7 @@ func (rf *Raft) RequestVote(
 	log.Printf("Current State: {T:%d, LLI:%d, LLT:%d}",
 		rf.currentTerm, rf.log.LastIndex(), rf.log.Term(rf.log.LastIndex()))
 
-	rf.processIncomingTerm(args.CorrelationID, log, args.CandidateID, args.Term)
+	rf.processIncomingTerm(ctx, log, args.CandidateID, args.Term)
 
 	reply.VoteGranted = false
 	reply.Term = rf.currentTerm
@@ -284,7 +285,7 @@ func (rf *Raft) RequestVote(
 	default:
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateID
-		rf.persist(args.CorrelationID)
+		rf.persist(ctx)
 		rf.leaderElection.ResetTicker()
 		log.Printf("Voted for %d ", args.CandidateID)
 	}

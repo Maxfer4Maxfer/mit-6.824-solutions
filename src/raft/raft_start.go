@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"context"
 	"log"
 	"sync"
 )
@@ -24,11 +25,11 @@ func (rf *Raft) startProcessAnswers(
 			rf.mu.Lock()
 			if index <= rf.commitIndex() || index <= rf.log.lastIncludedIndex {
 				rf.mu.Unlock()
-				log.Printf("index %d already commited", index)
+				log.Printf("index %d already committed", index)
+
 				done = true
 
 				continue
-
 			}
 
 			differentTerm := rf.log.Term(index) != rf.currentTerm
@@ -36,6 +37,7 @@ func (rf *Raft) startProcessAnswers(
 
 			if differentTerm {
 				log.Printf("Previous term detected")
+
 				done = true
 
 				continue
@@ -48,14 +50,6 @@ func (rf *Raft) startProcessAnswers(
 			done = true
 		}
 	}
-}
-
-func (rf *Raft) startCreateLogger(correlationID string) *log.Logger {
-	log := extendLoggerWithTopic(rf.logger, startLogTopic)
-
-	log = extendLoggerWithCorrelationID(log, correlationID)
-
-	return log
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
@@ -71,8 +65,8 @@ func (rf *Raft) startCreateLogger(correlationID string) *log.Logger {
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	correlationID := CorrelationID()
-	log := rf.startCreateLogger(correlationID)
+	ctx := addCorrelationID(context.Background(), correlationID())
+	log := extendLogger(ctx, rf.logger, startLogTopic)
 
 	log.Printf("Start call %v", command)
 
@@ -87,14 +81,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	args := &AppendEntriesArgs{
-		CorrelationID: correlationID,
+		CorrelationID: getCorrelationID(ctx),
 		Term:          rf.currentTerm,
 		LeaderID:      rf.me,
 		LeaderCommit:  rf.commitIndex(),
 	}
 
 	rf.log.Append(LogEntry{rf.currentTerm, command})
-	rf.persist(correlationID)
+	rf.persist(ctx)
 	index := rf.log.LastIndex()
 	rf.mu.Unlock()
 
@@ -113,7 +107,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		go func(peerID int) {
 			defer wg.Done()
 
-			ok := rf.sync(log, peerID, index, args.DeepCopy())
+			ok := rf.sync(ctx, log, peerID, index, args.DeepCopy())
 			if ok {
 				resultCh <- struct{}{}
 			}

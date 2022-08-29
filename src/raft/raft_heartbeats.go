@@ -13,13 +13,13 @@ type heartbeatsEngine struct {
 	run                int32 // 1 - run; 0 - stop running
 	cond               *sync.Cond
 	broadcastTime      time.Duration
-	sendHeartbeatsFunc func(correlationID string)
+	sendHeartbeatsFunc func(cID CorrelationID)
 }
 
 func initHeartbeatsEngine(
 	logger *log.Logger,
 	broadcastTime time.Duration,
-	sendHeartbeatsFunc func(correlationID string),
+	sendHeartbeatsFunc func(cID CorrelationID),
 ) *heartbeatsEngine {
 	hbe := &heartbeatsEngine{
 		log:                extendLoggerWithTopic(logger, heartbeatingLogTopic),
@@ -65,7 +65,7 @@ func (hbe *heartbeatsEngine) processing() {
 			case <-ctx.Done():
 				return
 			default:
-				correlationID := CorrelationID()
+				correlationID := correlationID()
 				log := extendLoggerWithCorrelationID(hbe.log, correlationID)
 
 				log.Printf("Hearbeats timer is triggered")
@@ -85,23 +85,27 @@ func (hbe *heartbeatsEngine) processing() {
 			if cancelf != nil {
 				cancelf()
 			}
+
 			hbe.cond.Wait()
 		case atomic.LoadInt32(&hbe.run) == 1:
 			ctx, cancel := context.WithCancel(context.Background())
+
 			go ticker(ctx)
+
 			cancelf = cancel
+
 			hbe.cond.Wait()
 		}
 	}
 }
 
-func (rf *Raft) sendHeartbeats(correlationID string) {
-	log := extendLoggerWithTopic(rf.logger, heartbeatingLogTopic)
-	log = extendLoggerWithCorrelationID(log, correlationID)
+func (rf *Raft) sendHeartbeats(cID CorrelationID) {
+	ctx := addCorrelationID(context.Background(), cID)
+	log := extendLogger(ctx, rf.logger, heartbeatingLogTopic)
 
 	rf.mu.Lock()
 	args := &AppendEntriesArgs{
-		CorrelationID: correlationID,
+		CorrelationID: cID,
 		Term:          rf.currentTerm,
 		LeaderID:      rf.me,
 		LeaderCommit:  rf.commitIndex(),
@@ -115,6 +119,6 @@ func (rf *Raft) sendHeartbeats(correlationID string) {
 			continue
 		}
 
-		go rf.sync(log, peerID, index, args.DeepCopy())
+		go rf.sync(ctx, log, peerID, index, args.DeepCopy())
 	}
 }

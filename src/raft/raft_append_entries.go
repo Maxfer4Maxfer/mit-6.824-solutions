@@ -1,11 +1,15 @@
 package raft
 
-import "log"
+import (
+	"context"
+	"log"
+)
 
 func (rf *Raft) AppendEntries(
 	args *AppendEntriesArgs, reply *AppendEntriesReply,
 ) {
 	log := rf.appendEntriesCreateLogger(args)
+	ctx := addCorrelationID(context.Background(), args.CorrelationID)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -20,9 +24,8 @@ func (rf *Raft) AppendEntries(
 
 	reply.Term = rf.currentTerm
 
-	rf.processIncomingTerm(args.CorrelationID, log, args.LeaderID, args.Term)
-
-	rf.appendEntriesProcessArgs(log, args, reply)
+	rf.processIncomingTerm(ctx, log, args.LeaderID, args.Term)
+	rf.appendEntriesProcessArgs(ctx, log, args, reply)
 }
 
 func (rf *Raft) appendEntriesCreateLogger(args *AppendEntriesArgs) *log.Logger {
@@ -40,7 +43,8 @@ func (rf *Raft) appendEntriesCreateLogger(args *AppendEntriesArgs) *log.Logger {
 }
 
 func (rf *Raft) appendEntriesProcessArgs(
-	log *log.Logger, args *AppendEntriesArgs, reply *AppendEntriesReply,
+	ctx context.Context, log *log.Logger,
+	args *AppendEntriesArgs, reply *AppendEntriesReply,
 ) {
 	switch {
 	case args.Term < rf.currentTerm:
@@ -50,28 +54,32 @@ func (rf *Raft) appendEntriesProcessArgs(
 	case rf.log.LastIndex() < args.PrevLogIndex:
 		log.Printf("log is smaller %d < %d", rf.log.LastIndex(), args.PrevLogIndex)
 
+		reply.Success = false
+
 		rf.leaderElection.ResetTicker()
 
 		reply.ConflictIndex = rf.log.LastIndex()
 		reply.ConflictTerm = -1
-		reply.Success = false
 	case args.PrevLogIndex+len(args.Entries) <= rf.commitIndex():
 		log.Printf("Updated by someone else PLL:%d + len(Entrins):%d <= CI:%d",
 			args.PrevLogIndex, len(args.Entries), rf.commitIndex())
 
 		reply.Success = true
+
 		rf.leaderElection.ResetTicker()
 		rf.appendEntriesProcessLeaderCommit(log, args)
 	case args.PrevLogIndex < rf.log.lastIncludedIndex:
 		log.Printf("Incomming entries in local snapshot PLI:%d < LII:%d",
 			args.PrevLogIndex, rf.log.lastIncludedIndex)
 
+		reply.Success = false
 		reply.ConflictIndex = rf.log.lastIncludedIndex
 		reply.ConflictTerm = rf.log.lastIncludedTerm
-		reply.Success = false
 	case rf.log.Term(args.PrevLogIndex) != args.PrevLogTerm:
 		log.Printf("Log discrepancy %d != %d",
 			rf.log.Term(args.PrevLogIndex), args.PrevLogTerm)
+
+		reply.Success = false
 
 		rf.leaderElection.ResetTicker()
 
@@ -86,18 +94,17 @@ func (rf *Raft) appendEntriesProcessArgs(
 
 			break
 		}
-
-		reply.Success = false
 	default:
 		reply.Success = true
+
 		rf.leaderElection.ResetTicker()
-		rf.appendEntriesProcessIncomingEntries(log, args)
+		rf.appendEntriesProcessIncomingEntries(ctx, log, args)
 		rf.appendEntriesProcessLeaderCommit(log, args)
 	}
 }
 
 func (rf *Raft) appendEntriesProcessIncomingEntries(
-	log *log.Logger, args *AppendEntriesArgs,
+	ctx context.Context, log *log.Logger, args *AppendEntriesArgs,
 ) {
 	if len(args.Entries) == 0 {
 		return
@@ -132,7 +139,7 @@ func (rf *Raft) appendEntriesProcessIncomingEntries(
 	if add {
 		log.Printf("Append [%d:]", index)
 		rf.log.Append(args.Entries[index:]...)
-		rf.persist(args.CorrelationID)
+		rf.persist(ctx)
 	} else {
 		log.Printf("No new entries")
 	}
@@ -166,7 +173,7 @@ const (
 )
 
 func (rf *Raft) syncProcessReply(
-	correlationID string,
+	ctx context.Context,
 	log *log.Logger,
 	peerID int,
 	args *AppendEntriesArgs,
@@ -199,7 +206,7 @@ func (rf *Raft) syncProcessReply(
 		rf.votedFor = -1
 		rf.currentTerm = reply.Term
 
-		rf.persist(args.CorrelationID)
+		rf.persist(ctx)
 
 		rf.mu.Unlock()
 
@@ -210,7 +217,7 @@ func (rf *Raft) syncProcessReply(
 			rf.nextIndex[peerID] = rf.log.FirstIndex()
 			rf.mu.Unlock()
 
-			rf.syncSnapshot(correlationID, peerID)
+			rf.syncSnapshot(ctx, peerID)
 
 			return syncProcessReplyReturnRetry
 		}
@@ -232,7 +239,7 @@ func (rf *Raft) syncProcessReply(
 		for i := args.PrevLogIndex - 1; i > 0; i-- {
 			if i < rf.log.FirstIndex() {
 				rf.mu.Unlock()
-				rf.syncSnapshot(correlationID, peerID)
+				rf.syncSnapshot(ctx, peerID)
 
 				return syncProcessReplyReturnRetry
 			}
@@ -263,7 +270,7 @@ func (rf *Raft) syncProcessReply(
 			rf.nextIndex[peerID] = index + 1
 		}
 
-		rf.updateMatchIndex(correlationID, peerID, index)
+		rf.updateMatchIndex(ctx, peerID, index)
 
 		rf.mu.Unlock()
 
@@ -272,6 +279,7 @@ func (rf *Raft) syncProcessReply(
 }
 
 func (rf *Raft) sync(
+	ctx context.Context,
 	log *log.Logger,
 	peerID int,
 	index int,
@@ -304,7 +312,7 @@ func (rf *Raft) sync(
 
 		if rf.nextIndex[peerID]-1 < rf.log.lastIncludedIndex {
 			rf.mu.Unlock()
-			rf.syncSnapshot(args.CorrelationID, peerID)
+			rf.syncSnapshot(ctx, peerID)
 
 			continue
 		}
@@ -325,8 +333,7 @@ func (rf *Raft) sync(
 			continue
 		}
 
-		a := rf.syncProcessReply(
-			args.CorrelationID, log, peerID, args, reply, index)
+		a := rf.syncProcessReply(ctx, log, peerID, args, reply, index)
 		switch a {
 		case syncProcessReplyReturnRetry:
 			continue

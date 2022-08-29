@@ -1,5 +1,7 @@
 package raft
 
+import "context"
+
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
 // have more recent info since it communicate the snapshot on applyCh.
 func (rf *Raft) CondInstallSnapshot(
@@ -14,11 +16,9 @@ func (rf *Raft) CondInstallSnapshot(
 // service no longer needs the log through (and including)
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (2D).
-	correlationID := CorrelationID()
+	ctx := addCorrelationID(context.Background(), correlationID())
+	log := extendLogger(ctx, rf.logger, snapshotLogTopic)
 
-	log := extendLoggerWithTopic(rf.logger, snapshotLogTopic)
-	log = extendLoggerWithCorrelationID(log, correlationID)
 	log.Printf("Snapshot")
 
 	rf.mu.Lock()
@@ -42,15 +42,13 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	log.Printf("Log lshrink {LI:%d len(log):%d OF:%d}",
 		rf.log.LastIndex(), len(rf.log.log), rf.log.offset)
 
-	rf.persistWithSnapshot(correlationID, snapshot)
+	rf.persistWithSnapshot(ctx, snapshot)
 
 	rf.setCommitIndex(log, index)
-
 }
 
-func (rf *Raft) syncSnapshot(correlationID string, peerID int) {
-	log := extendLoggerWithTopic(rf.logger, installSnapshotLogTopic)
-	log = extendLoggerWithCorrelationID(log, correlationID)
+func (rf *Raft) syncSnapshot(ctx context.Context, peerID int) {
+	log := extendLogger(ctx, rf.logger, installSnapshotLogTopic)
 
 	reply := &InstallSnapshotReply{}
 
@@ -63,7 +61,7 @@ func (rf *Raft) syncSnapshot(correlationID string, peerID int) {
 		}
 
 		args := &InstallSnapshotArgs{
-			CorrelationID:     correlationID,
+			CorrelationID:     getCorrelationID(ctx),
 			Term:              rf.currentTerm,
 			LeaderID:          rf.me,
 			LastIncludedIndex: rf.log.lastIncludedIndex,
@@ -107,7 +105,7 @@ func (rf *Raft) syncSnapshot(correlationID string, peerID int) {
 			rf.nextIndex[peerID] = args.LastIncludedIndex + 1
 		}
 
-		rf.updateMatchIndex(correlationID, peerID, args.LastIncludedIndex)
+		rf.updateMatchIndex(ctx, peerID, args.LastIncludedIndex)
 
 		return
 	}
@@ -116,8 +114,8 @@ func (rf *Raft) syncSnapshot(correlationID string, peerID int) {
 func (rf *Raft) InstallSnapshot(
 	args *InstallSnapshotArgs, reply *InstallSnapshotReply,
 ) {
-	log := extendLoggerWithTopic(rf.logger, installSnapshotLogTopic)
-	log = extendLoggerWithCorrelationID(log, args.CorrelationID)
+	ctx := addCorrelationID(context.Background(), args.CorrelationID)
+	log := extendLogger(ctx, rf.logger, installSnapshotLogTopic)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -156,7 +154,7 @@ func (rf *Raft) InstallSnapshot(
 
 	rf.log.LeftShrink(args.LastIncludedIndex)
 
-	rf.persistWithSnapshot(args.CorrelationID, args.Data)
+	rf.persistWithSnapshot(ctx, args.Data)
 
 	// 8. Reset state machine using snapshot contents (and load
 	// snapshot’s cluster configuration)

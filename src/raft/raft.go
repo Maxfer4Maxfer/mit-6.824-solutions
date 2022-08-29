@@ -16,6 +16,7 @@ package raft
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"math/rand"
@@ -122,10 +123,6 @@ func (rf *Raft) setLastApplied(v int) {
 	atomic.StoreInt64(&rf.vLastApplied, int64(v))
 }
 
-func (rf *Raft) addToLastApplies(v int) {
-	atomic.AddInt64(&rf.vLastApplied, int64(v))
-}
-
 func (rf *Raft) commitIndex() int {
 	return int(atomic.LoadInt64(&rf.vCommitIndex))
 }
@@ -195,6 +192,7 @@ func (rf *Raft) applyLogProcessing() {
 				rf.mu.Unlock()
 
 				applied := false
+
 				for {
 					if applied {
 						break
@@ -238,13 +236,13 @@ func (rf *Raft) GetState() (int, bool) {
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
-func (rf *Raft) persist(correlationID string) {
-	rf.persistWithSnapshot(correlationID, nil)
+func (rf *Raft) persist(ctx context.Context) {
+	rf.persistWithSnapshot(ctx, nil)
 }
 
-func (rf *Raft) persistWithSnapshot(correlationID string, snapshot []byte) {
+func (rf *Raft) persistWithSnapshot(ctx context.Context, snapshot []byte) {
 	log := extendLoggerWithTopic(rf.logger, persisterLogTopic)
-	log = extendLoggerWithCorrelationID(log, correlationID)
+	log = extendLoggerWithCorrelationID(log, getCorrelationID(ctx))
 
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
@@ -258,12 +256,12 @@ func (rf *Raft) persistWithSnapshot(correlationID string, snapshot []byte) {
 
 	state := w.Bytes()
 
-	log.Printf("save CT:%d VF:%d LII:%d LIT:%d OF:%d len(log):%d",
+	log.Printf("save CT:%d VF:%d LII:%d LIT:%d OF:%d len(log):%d len(state):%d",
 		rf.currentTerm, rf.votedFor,
 		rf.log.lastIncludedIndex, rf.log.lastIncludedTerm,
-		rf.log.offset, len(rf.log.log)-1)
+		rf.log.offset, len(rf.log.log), len(state))
 
-	if snapshot == nil || len(snapshot) == 0 {
+	if len(snapshot) == 0 {
 		rf.persister.SaveRaftState(state)
 	} else {
 		rf.persister.SaveStateAndSnapshot(state, snapshot)
@@ -364,7 +362,7 @@ func (rf *Raft) killed() bool {
 }
 
 func (rf *Raft) processIncomingTerm(
-	correlationID string, log *log.Logger, peerID int, term int,
+	ctx context.Context, log *log.Logger, peerID int, term int,
 ) bool {
 	if term > rf.currentTerm {
 		log.Printf("S%d has a higher term %d > %d", peerID, term, rf.currentTerm)
@@ -379,7 +377,7 @@ func (rf *Raft) processIncomingTerm(
 		rf.votedFor = -1
 		rf.currentTerm = term
 
-		rf.persist(correlationID)
+		rf.persist(ctx)
 
 		return false
 	}

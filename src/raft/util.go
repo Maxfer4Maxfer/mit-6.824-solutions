@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"context"
 	crand "crypto/rand"
 	"log"
 	"math/big"
@@ -35,11 +36,36 @@ const (
 	correlationIDLowerBoundary = 10000
 )
 
-func CorrelationID() string {
+type CorrelationID string
+
+func (cID CorrelationID) String() string {
+	return string(cID)
+}
+
+func correlationID() CorrelationID {
 	var (
 		max = correlationIDUpperBoundary
 		min = correlationIDLowerBoundary
 	)
 
-	return strconv.Itoa(int(rand.Int63n(int64(max-min))) + min)
+	return CorrelationID(strconv.Itoa(int(rand.Int63n(int64(max-min))) + min))
+}
+
+type contextKey int
+
+const (
+	contextKeyCorrelationID contextKey = iota
+)
+
+func addCorrelationID(ctx context.Context, cID CorrelationID) context.Context {
+	return context.WithValue(ctx, contextKeyCorrelationID, cID)
+}
+
+func getCorrelationID(ctx context.Context) CorrelationID {
+	cID, ok := ctx.Value(contextKeyCorrelationID).(CorrelationID)
+	if !ok {
+		return correlationID()
+	}
+
+	return cID
 }
