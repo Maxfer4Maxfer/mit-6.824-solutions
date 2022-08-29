@@ -1271,9 +1271,10 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			// needs to rceive a snapshot to catch up.
 			fmt.Printf("Test: connect S%d\n", victim)
 			cfg.connect(victim)
+			fmt.Printf("Test: Start Call\n")
 			cfg.one(rand.Int(), servers, true)
 			leader1 = cfg.checkOneLeader()
-			fmt.Printf("Test: leader S%d", leader1)
+			fmt.Printf("Test: leader S%d\n", leader1)
 		}
 		if crash {
 			cfg.start1(victim, cfg.applierSnap)

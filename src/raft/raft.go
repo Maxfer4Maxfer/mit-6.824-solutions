@@ -239,6 +239,10 @@ func (rf *Raft) GetState() (int, bool) {
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
 func (rf *Raft) persist(correlationID string) {
+	rf.persistWithSnapshot(correlationID, nil)
+}
+
+func (rf *Raft) persistWithSnapshot(correlationID string, snapshot []byte) {
 	log := extendLoggerWithTopic(rf.logger, persisterLogTopic)
 	log = extendLoggerWithCorrelationID(log, correlationID)
 
@@ -249,11 +253,21 @@ func (rf *Raft) persist(correlationID string) {
 	e.Encode(rf.votedFor)
 	e.Encode(rf.log.log)
 	e.Encode(rf.log.offset)
+	e.Encode(rf.log.lastIncludedIndex)
+	e.Encode(rf.log.lastIncludedTerm)
 
-	log.Printf("save CT:%d VF:%d OF:%d len(log):%d",
-		rf.currentTerm, rf.votedFor, rf.log.offset, len(rf.log.log)-1)
+	state := w.Bytes()
 
-	rf.persister.SaveRaftState(w.Bytes())
+	log.Printf("save CT:%d VF:%d LII:%d LIT:%d OF:%d len(log):%d",
+		rf.currentTerm, rf.votedFor,
+		rf.log.lastIncludedIndex, rf.log.lastIncludedTerm,
+		rf.log.offset, len(rf.log.log)-1)
+
+	if snapshot == nil || len(snapshot) == 0 {
+		rf.persister.SaveRaftState(state)
+	} else {
+		rf.persister.SaveStateAndSnapshot(state, snapshot)
+	}
 }
 
 // restore previously persisted state.
@@ -267,36 +281,49 @@ func (rf *Raft) readPersist(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 
-	var (
-		currentTerm int
-		votedFor    int
-		log         []LogEntry
-		offset      int
-	)
+	// var (
+	// 	currentTerm       int
+	// 	votedFor          int
+	// 	log               []LogEntry
+	// 	offset            int
+	// 	lastIncludedIndex int
+	// 	lastIncludedTerm  int
+	// )
 
-	if d.Decode(&currentTerm) != nil {
+	if d.Decode(&rf.currentTerm) != nil {
 		panic("currentTerm not found")
 	}
 
-	if d.Decode(&votedFor) != nil {
+	if d.Decode(&rf.votedFor) != nil {
 		panic("votedFor not found")
 	}
 
-	if d.Decode(&log) != nil {
+	if d.Decode(&rf.log.log) != nil {
 		panic("log not found")
 	}
 
-	if d.Decode(&offset) != nil {
+	if d.Decode(&rf.log.offset) != nil {
 		panic("offset not found")
 	}
 
-	rf.currentTerm = currentTerm
-	rf.votedFor = votedFor
-	rf.log.log = log
-	rf.log.offset = offset
+	if d.Decode(&rf.log.lastIncludedIndex) != nil {
+		panic("lastIncludedIndex not found")
+	}
 
-	logger.Printf("load CT:%d VF:%d OF:%d len(log):%d",
-		currentTerm, votedFor, offset, len(log)-1)
+	if d.Decode(&rf.log.lastIncludedTerm) != nil {
+		panic("lastIncludedTerm not found")
+	}
+
+	// rf.currentTerm = currentTerm
+	// rf.votedFor = votedFor
+	// rf.log.log = log
+	// rf.log.offset = offset
+	// rf.log.lastIncludedIndex = lastIncludedIndex
+	// rf.log.lastIncludedTerm = lastIncludedTerm
+
+	logger.Printf("load CT:%d VF:%d LII:%d LTI:%d OF:%d len(log):%d",
+		rf.currentTerm, rf.votedFor, rf.log.lastIncludedIndex,
+		rf.log.lastIncludedTerm, rf.log.offset, len(rf.log.log))
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -310,11 +337,24 @@ func (rf *Raft) readPersist(data []byte) {
 // should call killed() to check whether it should stop.
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	// Your code here, if desired.
 	log := extendLoggerWithTopic(rf.logger, commonLogTopic)
-	log.Printf("Received the KILL signal")
+	log.Printf("The KILL signal")
+
+	log.Printf("State:"+
+		"{L:%v CT:%d VF:%d CI:%d LA:%d len(log):%d LII:%d LTI:%d NI:%d MI:%d}",
+		rf.heartbeats.IsSendingInProgress(),
+		rf.currentTerm, rf.votedFor, rf.commitIndex(), rf.lastApplied(),
+		len(rf.log.log), rf.log.lastIncludedIndex, rf.log.lastIncludedTerm,
+		rf.nextIndex, rf.matchIndex,
+	)
 
 	rf.heartbeats.StopSending()
+	rf.leaderElection.StopLeaderElection()
 }
 
 func (rf *Raft) killed() bool {

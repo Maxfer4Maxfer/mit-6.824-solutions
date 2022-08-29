@@ -83,7 +83,7 @@ func (rl *RLog) LeftShrink(idx int) {
 // LeftShrink delete record from the left.
 // The provided idx NOT be deleted.
 func (rl *RLog) RightShrink(idx int) {
-	rl.log = rl.log[:idx]
+	rl.log = rl.log[:idx-rl.offset]
 }
 
 func (rl *RLog) Frame(from, to int) []LogEntry {

@@ -57,6 +57,9 @@ func (rf *Raft) matchIndexProcessing() {
 			rf.matchIndexCond.Wait()
 
 			rf.mu.Lock()
+
+			rf.matchIndex[rf.me] = rf.log.LastIndex()
+
 			if !rf.heartbeats.IsSendingInProgress() {
 				rf.mu.Unlock()
 				continue
@@ -64,16 +67,19 @@ func (rf *Raft) matchIndexProcessing() {
 
 			hMatchIndex, max := rf.matchIndexHistogram()
 
+			log.Printf("Histogram:%+v", hMatchIndex)
+
 			for N := max; N > rf.commitIndex(); N-- {
 				if N <= rf.log.lastIncludedIndex {
-					continue
-				}
+					log.Printf("Index %d included in last snapshot", N)
 
-				if rf.log.Term(N) != rf.commitIndex() {
 					continue
 				}
 
 				if hMatchIndex[N] < len(rf.peers)/2+1 {
+					log.Printf("Index %d not on server majority h[%d]:%d < %d",
+						N, N, hMatchIndex[N], len(rf.peers)/2+1)
+
 					continue
 				}
 

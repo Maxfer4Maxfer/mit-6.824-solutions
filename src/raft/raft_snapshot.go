@@ -1,11 +1,5 @@
 package raft
 
-import (
-	"bytes"
-
-	"6.824/labgob"
-)
-
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
 // have more recent info since it communicate the snapshot on applyCh.
 func (rf *Raft) CondInstallSnapshot(
@@ -21,8 +15,10 @@ func (rf *Raft) CondInstallSnapshot(
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
+	correlationID := CorrelationID()
+
 	log := extendLoggerWithTopic(rf.logger, snapshotLogTopic)
-	log = extendLoggerWithCorrelationID(log, CorrelationID())
+	log = extendLoggerWithCorrelationID(log, correlationID)
 	log.Printf("Snapshot")
 
 	rf.mu.Lock()
@@ -46,19 +42,10 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	log.Printf("Log lshrink {LI:%d len(log):%d OF:%d}",
 		rf.log.LastIndex(), len(rf.log.log), rf.log.offset)
 
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-
-	e.Encode(rf.currentTerm)
-	e.Encode(rf.votedFor)
-	e.Encode(rf.log.log)
-	e.Encode(rf.log.offset)
-
-	state := w.Bytes()
+	rf.persistWithSnapshot(correlationID, snapshot)
 
 	rf.setCommitIndex(log, index)
 
-	rf.persister.SaveStateAndSnapshot(state, snapshot)
 }
 
 func (rf *Raft) syncSnapshot(correlationID string, peerID int) {
@@ -70,6 +57,8 @@ func (rf *Raft) syncSnapshot(correlationID string, peerID int) {
 	for {
 		rf.mu.Lock()
 		if !rf.heartbeats.IsSendingInProgress() {
+			rf.mu.Unlock()
+
 			break
 		}
 
@@ -167,17 +156,7 @@ func (rf *Raft) InstallSnapshot(
 
 	rf.log.LeftShrink(args.LastIncludedIndex)
 
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-
-	e.Encode(rf.currentTerm)
-	e.Encode(rf.votedFor)
-	e.Encode(rf.log.log)
-	e.Encode(rf.log.offset)
-
-	state := w.Bytes()
-
-	rf.persister.SaveStateAndSnapshot(state, args.Data)
+	rf.persistWithSnapshot(args.CorrelationID, args.Data)
 
 	// 8. Reset state machine using snapshot contents (and load
 	// snapshot’s cluster configuration)

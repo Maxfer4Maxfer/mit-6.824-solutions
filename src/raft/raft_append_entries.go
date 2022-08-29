@@ -14,8 +14,9 @@ func (rf *Raft) AppendEntries(
 		args.LeaderID, args.Term, args.PrevLogIndex, args.PrevLogTerm,
 		args.LeaderCommit, len(args.Entries))
 
-	log.Printf("Current state: {T:%d LC:%d LI:%d LII:%d}", rf.currentTerm,
-		rf.commitIndex(), rf.log.LastIndex(), rf.log.lastIncludedIndex)
+	log.Printf("Current state: {T:%d LC:%d LI:%d LII:%d len(log):%d}",
+		rf.currentTerm, rf.commitIndex(), rf.log.LastIndex(),
+		rf.log.lastIncludedIndex, len(rf.log.log))
 
 	reply.Term = rf.currentTerm
 
@@ -206,7 +207,9 @@ func (rf *Raft) syncProcessReply(
 	// shorter follower's log
 	case !reply.Success && reply.ConflictTerm == -1:
 		if reply.ConflictIndex < rf.log.FirstIndex() {
+			rf.nextIndex[peerID] = rf.log.FirstIndex()
 			rf.mu.Unlock()
+
 			rf.syncSnapshot(correlationID, peerID)
 
 			return syncProcessReplyReturnRetry
@@ -280,6 +283,13 @@ func (rf *Raft) sync(
 		rf.mu.Lock()
 
 		if !rf.heartbeats.IsSendingInProgress() {
+			rf.mu.Unlock()
+
+			return false
+		}
+
+		if args.Term != rf.currentTerm {
+			log.Printf("Sync from the past %d != %d", args.Term, rf.currentTerm)
 			rf.mu.Unlock()
 
 			return false
