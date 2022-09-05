@@ -22,7 +22,7 @@ func initHeartbeatsEngine(
 	sendHeartbeatsFunc func(cID CorrelationID),
 ) *heartbeatsEngine {
 	hbe := &heartbeatsEngine{
-		log:                extendLoggerWithTopic(logger, heartbeatingLogTopic),
+		log:                ExtendLoggerWithTopic(logger, heartbeatingLogTopic),
 		run:                0,
 		cond:               sync.NewCond(&sync.Mutex{}),
 		broadcastTime:      broadcastTime,
@@ -65,8 +65,8 @@ func (hbe *heartbeatsEngine) processing() {
 			case <-ctx.Done():
 				return
 			default:
-				correlationID := correlationID()
-				log := extendLoggerWithCorrelationID(hbe.log, correlationID)
+				correlationID := NewCorrelationID()
+				log := ExtendLoggerWithCorrelationID(hbe.log, correlationID)
 
 				log.Printf("Hearbeats timer is triggered")
 
@@ -100,8 +100,8 @@ func (hbe *heartbeatsEngine) processing() {
 }
 
 func (rf *Raft) sendHeartbeats(cID CorrelationID) {
-	ctx := addCorrelationID(context.Background(), cID)
-	log := extendLogger(ctx, rf.logger, heartbeatingLogTopic)
+	ctx := AddCorrelationID(context.Background(), cID)
+	log := ExtendLogger(ctx, rf.logger, heartbeatingLogTopic)
 
 	rf.mu.Lock()
 	args := &AppendEntriesArgs{

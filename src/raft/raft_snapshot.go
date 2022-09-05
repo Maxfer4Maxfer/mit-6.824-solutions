@@ -16,8 +16,8 @@ func (rf *Raft) CondInstallSnapshot(
 // service no longer needs the log through (and including)
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	ctx := addCorrelationID(context.Background(), correlationID())
-	log := extendLogger(ctx, rf.logger, snapshotLogTopic)
+	ctx := AddCorrelationID(context.Background(), NewCorrelationID())
+	log := ExtendLogger(ctx, rf.logger, snapshotLogTopic)
 
 	log.Printf("Snapshot")
 
@@ -48,7 +48,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 }
 
 func (rf *Raft) syncSnapshot(ctx context.Context, peerID int) {
-	log := extendLogger(ctx, rf.logger, installSnapshotLogTopic)
+	log := ExtendLogger(ctx, rf.logger, installSnapshotLogTopic)
 
 	reply := &InstallSnapshotReply{}
 
@@ -61,7 +61,7 @@ func (rf *Raft) syncSnapshot(ctx context.Context, peerID int) {
 		}
 
 		args := &InstallSnapshotArgs{
-			CorrelationID:     getCorrelationID(ctx),
+			CorrelationID:     GetCorrelationID(ctx),
 			Term:              rf.currentTerm,
 			LeaderID:          rf.me,
 			LastIncludedIndex: rf.log.lastIncludedIndex,
@@ -114,8 +114,8 @@ func (rf *Raft) syncSnapshot(ctx context.Context, peerID int) {
 func (rf *Raft) InstallSnapshot(
 	args *InstallSnapshotArgs, reply *InstallSnapshotReply,
 ) {
-	ctx := addCorrelationID(context.Background(), args.CorrelationID)
-	log := extendLogger(ctx, rf.logger, installSnapshotLogTopic)
+	ctx := AddCorrelationID(context.Background(), args.CorrelationID)
+	log := ExtendLogger(ctx, rf.logger, installSnapshotLogTopic)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()

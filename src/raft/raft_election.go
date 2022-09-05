@@ -22,7 +22,7 @@ func initLeaderElectionEngine(
 	leaderElectionFunc func(context.Context),
 ) *leaderElectionEngine {
 	lee := &leaderElectionEngine{
-		log:                extendLoggerWithTopic(logger, leaderElectionLogTopic),
+		log:                ExtendLoggerWithTopic(logger, leaderElectionLogTopic),
 		mu:                 &sync.Mutex{},
 		resetTickerCh:      make(chan struct{}),
 		stopTickerCh:       make(chan struct{}),
@@ -54,7 +54,7 @@ func (lee *leaderElectionEngine) StopLeaderElection() {
 // The ticker go routine starts a new election if this peer hasn't received
 // heartsbeats recently.
 func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
-	log := extendLoggerWithTopic(logger, tickerLogTopic)
+	log := ExtendLoggerWithTopic(logger, tickerLogTopic)
 
 	max := int64(electionTimeoutUpperBoundary)
 	min := int64(electionTimeoutLowerBoundary)
@@ -65,15 +65,15 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 
 	go func() {
 		for range ticker.C {
-			correlationID := correlationID()
-			llog := extendLoggerWithCorrelationID(log, correlationID)
+			correlationID := NewCorrelationID()
+			llog := ExtendLoggerWithCorrelationID(log, correlationID)
 
 			llog.Printf("Did not see a leader to much")
 
 			lee.StopLeaderElection()
 
 			ctx, cancel := context.WithCancel(context.Background())
-			ctx = addCorrelationID(ctx, correlationID)
+			ctx = AddCorrelationID(ctx, correlationID)
 
 			lee.mu.Lock()
 			lee.electionCancelFunc = cancel
@@ -200,7 +200,7 @@ func (rf *Raft) leaderElectionVotesCalculation(
 }
 
 func (rf *Raft) leaderElectionStart(ctx context.Context) {
-	log := extendLogger(ctx, rf.logger, leaderElectionLogTopic)
+	log := ExtendLogger(ctx, rf.logger, leaderElectionLogTopic)
 
 	log.Printf("Starting new Leader election cycle")
 
@@ -220,7 +220,7 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 	log.Printf("Become a condidate and increase term to %d", rf.currentTerm)
 
 	args := &RequestVoteArgs{
-		CorrelationID: getCorrelationID(ctx),
+		CorrelationID: GetCorrelationID(ctx),
 		Term:          rf.currentTerm,
 		CandidateID:   rf.me,
 		LastLogIndex:  rf.log.LastIndex(),
@@ -251,8 +251,8 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 func (rf *Raft) RequestVote(
 	args *RequestVoteArgs, reply *RequestVoteReply,
 ) {
-	ctx := addCorrelationID(context.Background(), args.CorrelationID)
-	log := extendLogger(ctx, rf.logger, leaderElectionLogTopic)
+	ctx := AddCorrelationID(context.Background(), args.CorrelationID)
+	log := ExtendLogger(ctx, rf.logger, leaderElectionLogTopic)
 
 	log.Printf("<- S%d {T:%d, LLI:%d, LLT:%d}",
 		args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm)

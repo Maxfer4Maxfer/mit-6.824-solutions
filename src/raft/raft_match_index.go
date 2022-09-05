@@ -7,7 +7,7 @@ import (
 
 func (rf *Raft) updateMatchIndex(ctx context.Context, peerID int, index int) {
 	if rf.matchIndex[peerID] < index {
-		log := extendLogger(ctx, rf.logger, matchIndexLogTopic)
+		log := ExtendLogger(ctx, rf.logger, matchIndexLogTopic)
 
 		log.Printf("Update matchIndex for S%d %d -> %d",
 			peerID, rf.matchIndex[peerID], index)
@@ -47,7 +47,7 @@ func (rf *Raft) matchIndexHistogram() (map[int]int, int) {
 }
 
 func (rf *Raft) matchIndexProcessing() {
-	log := extendLoggerWithTopic(rf.logger, matchIndexLogTopic)
+	log := ExtendLoggerWithTopic(rf.logger, matchIndexLogTopic)
 
 	rf.matchIndexCond = sync.NewCond(&sync.Mutex{})
 	rf.matchIndexCond.L.Lock()

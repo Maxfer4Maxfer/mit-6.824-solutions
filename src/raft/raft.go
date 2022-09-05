@@ -36,7 +36,7 @@ const (
 	// The tester requires that the leader send heartbeat RPCs
 	// no more than ten times per second.
 	broadcastTime     = 110 * time.Millisecond
-	capacityOfApplyCh = 100
+	capacityOfApplyCh = 1000
 )
 
 // as each Raft peer becomes aware that successive log entries are
@@ -139,7 +139,7 @@ func (rf *Raft) setCommitIndex(log *log.Logger, ci int) {
 }
 
 func (rf *Raft) applyLogProcessing() {
-	log := extendLoggerWithTopic(rf.logger, applyLogTopic)
+	log := ExtendLoggerWithTopic(rf.logger, applyLogTopic)
 
 	rf.commitIndexCond = sync.NewCond(&sync.Mutex{})
 
@@ -186,7 +186,7 @@ func (rf *Raft) applyLogProcessing() {
 
 				command := rf.Log(idx).Command
 
-				log.Printf("-> applyCh {LII:%d LIT:%d command:%d}",
+				log.Printf("-> applyCh {LII:%d LIT:%d command:%+v}",
 					idx, rf.log.Term(idx), command)
 
 				rf.mu.Unlock()
@@ -241,8 +241,8 @@ func (rf *Raft) persist(ctx context.Context) {
 }
 
 func (rf *Raft) persistWithSnapshot(ctx context.Context, snapshot []byte) {
-	log := extendLoggerWithTopic(rf.logger, persisterLogTopic)
-	log = extendLoggerWithCorrelationID(log, getCorrelationID(ctx))
+	log := ExtendLoggerWithTopic(rf.logger, persisterLogTopic)
+	log = ExtendLoggerWithCorrelationID(log, GetCorrelationID(ctx))
 
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
@@ -274,19 +274,10 @@ func (rf *Raft) readPersist(data []byte) {
 		return
 	}
 
-	logger := extendLoggerWithTopic(rf.logger, persisterLogTopic)
+	logger := ExtendLoggerWithTopic(rf.logger, persisterLogTopic)
 
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
-
-	// var (
-	// 	currentTerm       int
-	// 	votedFor          int
-	// 	log               []LogEntry
-	// 	offset            int
-	// 	lastIncludedIndex int
-	// 	lastIncludedTerm  int
-	// )
 
 	if d.Decode(&rf.currentTerm) != nil {
 		panic("currentTerm not found")
@@ -312,13 +303,6 @@ func (rf *Raft) readPersist(data []byte) {
 		panic("lastIncludedTerm not found")
 	}
 
-	// rf.currentTerm = currentTerm
-	// rf.votedFor = votedFor
-	// rf.log.log = log
-	// rf.log.offset = offset
-	// rf.log.lastIncludedIndex = lastIncludedIndex
-	// rf.log.lastIncludedTerm = lastIncludedTerm
-
 	logger.Printf("load CT:%d VF:%d LII:%d LTI:%d OF:%d len(log):%d",
 		rf.currentTerm, rf.votedFor, rf.log.lastIncludedIndex,
 		rf.log.lastIncludedTerm, rf.log.offset, len(rf.log.log))
@@ -340,7 +324,7 @@ func (rf *Raft) Kill() {
 	defer rf.mu.Unlock()
 
 	// Your code here, if desired.
-	log := extendLoggerWithTopic(rf.logger, commonLogTopic)
+	log := ExtendLoggerWithTopic(rf.logger, commonLogTopic)
 	log.Printf("The KILL signal")
 
 	log.Printf("State:"+
@@ -417,7 +401,7 @@ func Make(
 	// Your initialization code here (2A, 2B, 2C).
 	rf.logger = log.New(
 		os.Stdout,
-		fmt.Sprintf("S%d ", me),
+		fmt.Sprintf("R%d ", me),
 		log.Lshortfile|log.Lmicroseconds,
 	)
 
@@ -433,6 +417,8 @@ func Make(
 
 	rf.matchIndexProcessing()
 	rf.applyLogProcessing()
+
+	rf.logger.Printf("Started")
 
 	return rf
 }

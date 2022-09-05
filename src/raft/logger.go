@@ -10,6 +10,8 @@ type LoggerTopic string
 
 const (
 	LoggerTopicEmpty        LoggerTopic = ""
+	LoggerTopicClerk        LoggerTopic = "CLERK"
+	LoggerTopicService      LoggerTopic = "SERVC"
 	appendEntriesLogTopic   LoggerTopic = "APPND"
 	applyLogTopic           LoggerTopic = "APPLY"
 	commonLogTopic          LoggerTopic = "COMMON"
@@ -34,11 +36,11 @@ func extendLoggerWithPrefix(l *log.Logger, pr string, d string) *log.Logger {
 	return out
 }
 
-func extendLoggerWithTopic(l *log.Logger, lt LoggerTopic) *log.Logger {
+func ExtendLoggerWithTopic(l *log.Logger, lt LoggerTopic) *log.Logger {
 	return extendLoggerWithPrefix(l, string(lt), " ")
 }
 
-func extendLoggerWithCorrelationID(l *log.Logger, cID CorrelationID) *log.Logger {
+func ExtendLoggerWithCorrelationID(l *log.Logger, cID CorrelationID) *log.Logger {
 	if cID == "" {
 		return l
 	}
@@ -46,11 +48,11 @@ func extendLoggerWithCorrelationID(l *log.Logger, cID CorrelationID) *log.Logger
 	return extendLoggerWithPrefix(l, cID.String(), "_")
 }
 
-func extendLogger(
+func ExtendLogger(
 	ctx context.Context, l *log.Logger, lt LoggerTopic,
 ) *log.Logger {
 	nl := extendLoggerWithPrefix(l, string(lt), " ")
-	nl = extendLoggerWithCorrelationID(nl, getCorrelationID(ctx))
+	nl = ExtendLoggerWithCorrelationID(nl, GetCorrelationID(ctx))
 
 	return nl
 }

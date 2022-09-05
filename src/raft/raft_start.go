@@ -52,6 +52,16 @@ func (rf *Raft) startProcessAnswers(
 	}
 }
 
+func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	return rf.start(NewCorrelationID(), command)
+}
+
+func (rf *Raft) StartWithCorrelationID(
+	cID CorrelationID, command interface{},
+) (int, int, bool) {
+	return rf.start(cID, command)
+}
+
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
 // server isn't the leader, returns false. otherwise start the
@@ -64,11 +74,11 @@ func (rf *Raft) startProcessAnswers(
 // if it's ever committed. the second return value is the current
 // term. the third return value is true if this server believes it is
 // the leader.
-func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	ctx := addCorrelationID(context.Background(), correlationID())
-	log := extendLogger(ctx, rf.logger, startLogTopic)
+func (rf *Raft) start(cID CorrelationID, command interface{}) (int, int, bool) {
+	ctx := AddCorrelationID(context.Background(), cID)
+	log := ExtendLogger(ctx, rf.logger, startLogTopic)
 
-	log.Printf("Start call %v", command)
+	log.Printf("Start call %+v", command)
 
 	rf.mu.Lock()
 	if !rf.heartbeats.IsSendingInProgress() {
@@ -81,7 +91,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	args := &AppendEntriesArgs{
-		CorrelationID: getCorrelationID(ctx),
+		CorrelationID: GetCorrelationID(ctx),
 		Term:          rf.currentTerm,
 		LeaderID:      rf.me,
 		LeaderCommit:  rf.commitIndex(),

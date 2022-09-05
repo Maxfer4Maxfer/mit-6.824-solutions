@@ -9,7 +9,7 @@ func (rf *Raft) AppendEntries(
 	args *AppendEntriesArgs, reply *AppendEntriesReply,
 ) {
 	log := rf.appendEntriesCreateLogger(args)
-	ctx := addCorrelationID(context.Background(), args.CorrelationID)
+	ctx := AddCorrelationID(context.Background(), args.CorrelationID)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -32,12 +32,12 @@ func (rf *Raft) appendEntriesCreateLogger(args *AppendEntriesArgs) *log.Logger {
 	var log *log.Logger
 
 	if len(args.Entries) == 0 {
-		log = extendLoggerWithTopic(rf.logger, heartbeatingLogTopic)
+		log = ExtendLoggerWithTopic(rf.logger, heartbeatingLogTopic)
 	} else {
-		log = extendLoggerWithTopic(rf.logger, appendEntriesLogTopic)
+		log = ExtendLoggerWithTopic(rf.logger, appendEntriesLogTopic)
 	}
 
-	log = extendLoggerWithCorrelationID(log, args.CorrelationID)
+	log = ExtendLoggerWithCorrelationID(log, args.CorrelationID)
 
 	return log
 }

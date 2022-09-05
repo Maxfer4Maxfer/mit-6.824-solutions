@@ -1,16 +1,44 @@
 package kvraft
 
-import "6.824/porcupine"
-import "6.824/models"
-import "testing"
-import "strconv"
-import "time"
-import "math/rand"
-import "strings"
-import "sync"
-import "sync/atomic"
-import "fmt"
-import "io/ioutil"
+import (
+	"fmt"
+	"io/ioutil"
+	"math/rand"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"6.824/models"
+	"6.824/porcupine"
+)
+
+// go test --race --run TestBasic3A | tee log.txt
+// go test --race --run TestSpeed3A | tee log.txt
+// go test --race --run TestConcurrent3A | tee log.txt
+// go test --race --run TestUnreliable3A | tee log.txt
+// go test --race --run TestUnreliableOneKey3A | tee log.txt
+// go test --race --run TestOnePartition3A | tee log.txt
+// go test --race --run TestManyPartitionsOneClient3A | tee log.txt
+// go test --race --run TestManyPartitionsManyClients3A | tee log.txt
+// go test --race --run TestPersistOneClient3A | tee log.txt
+// go test --race --run TestPersistConcurrent3A | tee log.txt
+// go test --race --run TestPersistConcurrentUnreliable3A | tee log.txt
+// go test --race --run TestPersistPartition3A | tee log.txt
+// go test --race --run TestPersistPartitionUnreliable3A | tee log.txt
+// go test --race --run TestPersistPartitionUnreliableLinearizable3A | tee log.txt
+
+// go test --race --run TestSnapshotRPC3B | tee log.txt
+// go test --race --run TestSnapshotSize3B | tee log.txt
+// go test --race --run TestSpeed3B | tee log.txt
+// go test --race --run TestSnapshotRecover3B | tee log.txt
+// go test --race --run TestSnapshotRecoverManyClients3B | tee log.txt
+// go test --race --run TestSnapshotUnreliable3B | tee log.txt
+// go test --race --run TestSnapshotUnreliableRecover3B | tee log.txt
+// go test --race --run TestSnapshotUnreliableRecoverConcurrentPartition3B | tee log.txt
+// go test --race --run TestSnapshotUnreliableRecoverConcurrentPartitionLinearizable3B | tee log.txt
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -210,7 +238,6 @@ func partitioner(t *testing.T, cfg *config, ch chan bool, done *int32) {
 // size) shouldn't exceed 8*maxraftstate. If maxraftstate is negative,
 // snapshots shouldn't be used.
 func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliable bool, crash bool, partitions bool, maxraftstate int, randomkeys bool) {
-
 	title := "Test: "
 	if unreliable {
 		// the network drops RPC requests and replies.
@@ -253,7 +280,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 		clnts[i] = make(chan int)
 	}
 	for i := 0; i < 3; i++ {
-		// log.Printf("Iteration %v\n", i)
+		fmt.Printf("Test: iteration %d/%d\n", i, 3)
 		atomic.StoreInt32(&done_clients, 0)
 		atomic.StoreInt32(&done_partitioner, 0)
 		go spawn_clients_and_wait(t, cfg, nclients, func(cli int, myck *Clerk, t *testing.T) {
@@ -334,7 +361,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 			cfg.ConnectAll()
 		}
 
-		// log.Printf("wait for clients\n")
+		fmt.Printf("Test: wait for clients\n")
 		for i := 0; i < nclients; i++ {
 			// log.Printf("read from clients %d\n", i)
 			j := <-clnts[i]
@@ -487,12 +514,14 @@ func TestOnePartition3A(t *testing.T) {
 	cfg.begin("Test: progress in majority (3A)")
 
 	p1, p2 := cfg.make_partition()
+	fmt.Printf("Test: two partition %v %v\n", p1, p2)
 	cfg.partition(p1, p2)
 
 	ckp1 := cfg.makeClient(p1)  // connect ckp1 to p1
 	ckp2a := cfg.makeClient(p2) // connect ckp2a to p2
 	ckp2b := cfg.makeClient(p2) // connect ckp2b to p2
 
+	fmt.Printf("Test: put K:1 V:14\n")
 	Put(cfg, ckp1, "1", "14", nil, -1)
 	check(cfg, t, ckp1, "1", "14")
 

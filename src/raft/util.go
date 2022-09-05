@@ -38,11 +38,13 @@ const (
 
 type CorrelationID string
 
+const CorrelationIDEmpty = CorrelationID("")
+
 func (cID CorrelationID) String() string {
 	return string(cID)
 }
 
-func correlationID() CorrelationID {
+func NewCorrelationID() CorrelationID {
 	var (
 		max = correlationIDUpperBoundary
 		min = correlationIDLowerBoundary
@@ -57,14 +59,14 @@ const (
 	contextKeyCorrelationID contextKey = iota
 )
 
-func addCorrelationID(ctx context.Context, cID CorrelationID) context.Context {
+func AddCorrelationID(ctx context.Context, cID CorrelationID) context.Context {
 	return context.WithValue(ctx, contextKeyCorrelationID, cID)
 }
 
-func getCorrelationID(ctx context.Context) CorrelationID {
+func GetCorrelationID(ctx context.Context) CorrelationID {
 	cID, ok := ctx.Value(contextKeyCorrelationID).(CorrelationID)
 	if !ok {
-		return correlationID()
+		return CorrelationIDEmpty
 	}
 
 	return cID
