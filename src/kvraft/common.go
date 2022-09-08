@@ -12,7 +12,7 @@ const (
 	ErrWrongOpType Err = "ErrWrongOpType"
 )
 
-// Put or Append
+// Put or Append.
 type PutAppendArgs struct {
 	Key   string
 	Value string

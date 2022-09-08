@@ -9,20 +9,19 @@ import (
 type LoggerTopic string
 
 const (
-	LoggerTopicEmpty        LoggerTopic = ""
-	LoggerTopicClerk        LoggerTopic = "CLERK"
-	LoggerTopicService      LoggerTopic = "SERVC"
-	appendEntriesLogTopic   LoggerTopic = "APPND"
-	applyLogTopic           LoggerTopic = "APPLY"
-	commonLogTopic          LoggerTopic = "COMMON"
-	heartbeatingLogTopic    LoggerTopic = "HRTBT"
-	installSnapshotLogTopic LoggerTopic = "ISNAP"
-	leaderElectionLogTopic  LoggerTopic = "ELECT"
-	matchIndexLogTopic      LoggerTopic = "MATCH"
-	persisterLogTopic       LoggerTopic = "PRSST"
-	snapshotLogTopic        LoggerTopic = "SNAPS"
-	startLogTopic           LoggerTopic = "START"
-	tickerLogTopic          LoggerTopic = "TICKR"
+	LoggerTopicAppendEntries   LoggerTopic = "APPND"
+	LoggerTopicApply           LoggerTopic = "APPLY"
+	LoggerTopicClerk           LoggerTopic = "CLERK"
+	LoggerTopicCommon          LoggerTopic = "COMMON"
+	LoggerTopicHeartbeating    LoggerTopic = "HRTBT"
+	LoggerTopicInstallSnapshot LoggerTopic = "ISNAP"
+	LoggerTopicLeaderElection  LoggerTopic = "ELECT"
+	LoggerTopicMatchIndex      LoggerTopic = "MATCH"
+	LoggerTopicPersister       LoggerTopic = "PRSST"
+	LoggerTopicService         LoggerTopic = "SERVC"
+	LoggerTopicSnapshot        LoggerTopic = "SNAPS"
+	LoggerTopicStart           LoggerTopic = "START"
+	LoggerTopicTicker          LoggerTopic = "TICKR"
 )
 
 func extendLoggerWithPrefix(l *log.Logger, pr string, d string) *log.Logger {

@@ -17,7 +17,7 @@ func (rf *Raft) CondInstallSnapshot(
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	ctx := AddCorrelationID(context.Background(), NewCorrelationID())
-	log := ExtendLogger(ctx, rf.logger, snapshotLogTopic)
+	log := ExtendLogger(ctx, rf.logger, LoggerTopicSnapshot)
 
 	log.Printf("Snapshot")
 
@@ -48,7 +48,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 }
 
 func (rf *Raft) syncSnapshot(ctx context.Context, peerID int) {
-	log := ExtendLogger(ctx, rf.logger, installSnapshotLogTopic)
+	log := ExtendLogger(ctx, rf.logger, LoggerTopicInstallSnapshot)
 
 	reply := &InstallSnapshotReply{}
 
@@ -115,7 +115,7 @@ func (rf *Raft) InstallSnapshot(
 	args *InstallSnapshotArgs, reply *InstallSnapshotReply,
 ) {
 	ctx := AddCorrelationID(context.Background(), args.CorrelationID)
-	log := ExtendLogger(ctx, rf.logger, installSnapshotLogTopic)
+	log := ExtendLogger(ctx, rf.logger, LoggerTopicInstallSnapshot)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()

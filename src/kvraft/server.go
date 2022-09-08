@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -12,15 +13,6 @@ import (
 	"6.824/labrpc"
 	"6.824/raft"
 )
-
-const Debug = false
-
-func DPrintf(format string, a ...interface{}) (n int, err error) {
-	if Debug {
-		log.Printf(format, a...)
-	}
-	return
-}
 
 type OpType int
 
@@ -72,10 +64,10 @@ func (op Op) Equal(a *Op) bool {
 
 type resultFunc func(Err)
 
-type request struct {
+type Request struct {
 	Op          *Op
 	Index       int
-	ResultFuncs []resultFunc
+	resultFuncs []resultFunc
 	Done        bool
 }
 
@@ -87,11 +79,15 @@ type KVServer struct {
 	dead    int32 // set by Kill()
 
 	maxraftstate int // snapshot if log grows this big
+	persister    *raft.Persister
 
 	// Your definitions here.
-	log      *log.Logger
-	store    map[string]string
-	requests map[string]request
+	log   *log.Logger
+	store map[string]string
+	// last done request groupded by cleck IDs
+	dRequest map[int]int64
+
+	requests map[string]Request
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -163,9 +159,7 @@ func (kv *KVServer) callRaft(ctx context.Context, op Op) Err {
 
 	wg.Add(1)
 
-	var resultFunc resultFunc
-
-	resultFunc = func(incomingResult Err) {
+	resultFunc := func(incomingResult Err) {
 		result = incomingResult
 		log.Printf("R: %v", result)
 		wg.Done()
@@ -175,8 +169,15 @@ func (kv *KVServer) callRaft(ctx context.Context, op Op) Err {
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
 
-		r, ok := kv.requests[op.RequestID]
+		lastExecutedSN, ok := kv.dRequest[clerkID(op.RequestID)]
+		if ok && lastExecutedSN >= SN(op.RequestID) {
+			log.Printf("Request %s is old", op.RequestID)
+			resultFunc(OK)
 
+			return
+		}
+
+		r, ok := kv.requests[op.RequestID]
 		if ok && r.Done {
 			log.Printf("Request %s is already executed", op.RequestID)
 			resultFunc(OK)
@@ -202,7 +203,7 @@ func (kv *KVServer) callRaft(ctx context.Context, op Op) Err {
 			r.Index = idx
 		}
 
-		r.ResultFuncs = append(r.ResultFuncs, resultFunc)
+		r.resultFuncs = append(r.resultFuncs, resultFunc)
 		kv.requests[op.RequestID] = r
 	}()
 
@@ -220,37 +221,38 @@ func (kv *KVServer) informResult(requestID string, idx int, result Err) {
 	}
 
 	kv.log.Printf("rID:%s I:%d D:%v len(chs):%d",
-		requestID, r.Index, r.Done, len(r.ResultFuncs))
+		requestID, r.Index, r.Done, len(r.resultFuncs))
 
-	for _, rf := range r.ResultFuncs {
+	for _, rf := range r.resultFuncs {
 		rf(result)
 	}
 
-	r.ResultFuncs = []resultFunc{}
+	r.resultFuncs = []resultFunc{}
 	r.Index = idx
 	r.Done = true
 	kv.requests[requestID] = r
-
-	// kv.log.Printf("!!!rID:%+v", kv.requests)
+	kv.dRequest[clerkID(requestID)] = SN(requestID)
 
 	for rID, e := range kv.requests {
 		if e.Index >= r.Index {
 			continue
 		}
 
-		if len(e.ResultFuncs) == 0 {
+		if len(e.resultFuncs) == 0 {
 			continue
 		}
 
-		kv.log.Printf("Found the uncommited predecessor %d < %d rID:%s Op:%+v",
+		kv.log.Printf("Found the uncommitted predecessor %d < %d rID:%s Op:%+v",
 			e.Index, r.Index, rID, e.Op)
 
-		for _, rf := range e.ResultFuncs {
+		for _, rf := range e.resultFuncs {
 			rf(ErrWrongLeader)
 		}
 
-		e.ResultFuncs = []resultFunc{}
-		kv.requests[rID] = e
+		// e.resultFuncs = []resultFunc{}
+		// kv.requests[rID] = e
+
+		delete(kv.requests, rID)
 	}
 }
 
@@ -275,8 +277,10 @@ func (kv *KVServer) processApplyCh() {
 	for msg := range kv.applyCh {
 		// Snapshot case
 		if !msg.CommandValid {
-			kv.log.Printf("Incomming stapshot ST:%d, SI:%d, len:%d",
+			kv.log.Printf("Incoming stapshot ST:%d, SI:%d, len:%d",
 				msg.SnapshotTerm, msg.SnapshotIndex, len(msg.Snapshot))
+
+			kv.readSnapshot(msg.Snapshot)
 
 			continue
 		}
@@ -309,17 +313,76 @@ func (kv *KVServer) processApplyCh() {
 		// first see or did not apply yet
 		default:
 			err = OK
-			kv.processOp(op)
 			r.Done = true
 			kv.requests[op.RequestID] = r
+			kv.dRequest[clerkID(op.RequestID)] = SN(op.RequestID)
+
+			kv.processOp(op)
 		}
 
 		kv.informResult(op.RequestID, msg.CommandIndex, err)
+
+		if kv.maxraftstate != -1 && kv.maxraftstate <= kv.persister.RaftStateSize() {
+			kv.rf.Snapshot(msg.CommandIndex, kv.snapshot())
+		}
+
 		kv.mu.Unlock()
 	}
 }
 
-//
+func (kv *KVServer) snapshot() []byte {
+	log := raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopicSnapshot)
+
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+
+	e.Encode(kv.store)
+
+	log.Printf("save len(store):%d len(snapshot):%d",
+		len(kv.store), w.Len())
+
+	e.Encode(kv.dRequest)
+
+	log.Printf("save len(dRequests):%d  len(snapshot):%d",
+		len(kv.dRequest), w.Len())
+
+	log.Printf("save len(store):%d len(dRequest):%d len(snapshot):%d",
+		len(kv.store), len(kv.requests), w.Len())
+
+	return w.Bytes()
+}
+
+func (kv *KVServer) readSnapshot(data []byte) {
+	log := raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopicSnapshot)
+
+	log.Printf("read len(snapshot):%d", len(data))
+
+	if len(data) == 0 {
+		return
+	}
+
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	if err := d.Decode(&kv.store); err != nil {
+		panic(fmt.Sprintf("store not found: %v", err))
+	}
+
+	log.Printf("load len(store):%d", len(kv.store))
+
+	if err := d.Decode(&kv.dRequest); err != nil {
+		panic(fmt.Sprintf("dRequests not found: %v", err))
+	}
+
+	log.Printf("load len(dRequests):%d", len(kv.dRequest))
+
+	log.Printf("load len(store):%d len(dRequests):%d len(snapshot):%d",
+		len(kv.store), len(kv.dRequest), len(data))
+}
+
 // the tester calls Kill() when a KVServer instance won't
 // be needed again. for your convenience, we supply
 // code to set rf.dead (without needing a lock),
@@ -328,19 +391,19 @@ func (kv *KVServer) processApplyCh() {
 // code to Kill(). you're not required to do anything
 // about this, but it may be convenient (for example)
 // to suppress debug output from a Kill()ed instance.
-//
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
+
+	log := raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopicCommon)
+	log.Printf("The KILL signal")
+
 	kv.rf.Kill()
-	// Your code here, if desired.
 }
 
 func (kv *KVServer) killed() bool {
-	z := atomic.LoadInt32(&kv.dead)
-	return z == 1
+	return atomic.LoadInt32(&kv.dead) == 1
 }
 
-//
 // servers[] contains the ports of the set of
 // servers that will cooperate via Raft to
 // form the fault-tolerant key/value service.
@@ -353,7 +416,6 @@ func (kv *KVServer) killed() bool {
 // you don't need to snapshot.
 // StartKVServer() must return quickly, so it should start goroutines
 // for any long-running work.
-//
 func StartKVServer(
 	servers []*labrpc.ClientEnd, me int,
 	persister *raft.Persister, maxraftstate int,
@@ -365,6 +427,7 @@ func StartKVServer(
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
+	kv.persister = persister
 
 	// You may need initialization code here.
 
@@ -378,7 +441,10 @@ func StartKVServer(
 	kv.log = raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopicService)
 
 	kv.store = make(map[string]string)
-	kv.requests = make(map[string]request)
+	kv.requests = make(map[string]Request)
+	kv.dRequest = make(map[int]int64)
+
+	kv.readSnapshot(persister.ReadSnapshot())
 
 	go kv.processApplyCh()
 

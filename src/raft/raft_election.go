@@ -22,7 +22,7 @@ func initLeaderElectionEngine(
 	leaderElectionFunc func(context.Context),
 ) *leaderElectionEngine {
 	lee := &leaderElectionEngine{
-		log:                ExtendLoggerWithTopic(logger, leaderElectionLogTopic),
+		log:                ExtendLoggerWithTopic(logger, LoggerTopicLeaderElection),
 		mu:                 &sync.Mutex{},
 		resetTickerCh:      make(chan struct{}),
 		stopTickerCh:       make(chan struct{}),
@@ -54,7 +54,7 @@ func (lee *leaderElectionEngine) StopLeaderElection() {
 // The ticker go routine starts a new election if this peer hasn't received
 // heartsbeats recently.
 func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
-	log := ExtendLoggerWithTopic(logger, tickerLogTopic)
+	log := ExtendLoggerWithTopic(logger, LoggerTopicTicker)
 
 	max := int64(electionTimeoutUpperBoundary)
 	min := int64(electionTimeoutLowerBoundary)
@@ -200,7 +200,7 @@ func (rf *Raft) leaderElectionVotesCalculation(
 }
 
 func (rf *Raft) leaderElectionStart(ctx context.Context) {
-	log := ExtendLogger(ctx, rf.logger, leaderElectionLogTopic)
+	log := ExtendLogger(ctx, rf.logger, LoggerTopicLeaderElection)
 
 	log.Printf("Starting new Leader election cycle")
 
@@ -252,7 +252,7 @@ func (rf *Raft) RequestVote(
 	args *RequestVoteArgs, reply *RequestVoteReply,
 ) {
 	ctx := AddCorrelationID(context.Background(), args.CorrelationID)
-	log := ExtendLogger(ctx, rf.logger, leaderElectionLogTopic)
+	log := ExtendLogger(ctx, rf.logger, LoggerTopicLeaderElection)
 
 	log.Printf("<- S%d {T:%d, LLI:%d, LLT:%d}",
 		args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm)

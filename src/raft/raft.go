@@ -139,7 +139,7 @@ func (rf *Raft) setCommitIndex(log *log.Logger, ci int) {
 }
 
 func (rf *Raft) applyLogProcessing() {
-	log := ExtendLoggerWithTopic(rf.logger, applyLogTopic)
+	log := ExtendLoggerWithTopic(rf.logger, LoggerTopicApply)
 
 	rf.commitIndexCond = sync.NewCond(&sync.Mutex{})
 
@@ -186,7 +186,7 @@ func (rf *Raft) applyLogProcessing() {
 
 				command := rf.Log(idx).Command
 
-				log.Printf("-> applyCh {LII:%d LIT:%d command:%+v}",
+				log.Printf("-> applyCh {I:%d T:%d command:%+v}",
 					idx, rf.log.Term(idx), command)
 
 				rf.mu.Unlock()
@@ -241,7 +241,7 @@ func (rf *Raft) persist(ctx context.Context) {
 }
 
 func (rf *Raft) persistWithSnapshot(ctx context.Context, snapshot []byte) {
-	log := ExtendLoggerWithTopic(rf.logger, persisterLogTopic)
+	log := ExtendLoggerWithTopic(rf.logger, LoggerTopicPersister)
 	log = ExtendLoggerWithCorrelationID(log, GetCorrelationID(ctx))
 
 	w := new(bytes.Buffer)
@@ -274,7 +274,7 @@ func (rf *Raft) readPersist(data []byte) {
 		return
 	}
 
-	logger := ExtendLoggerWithTopic(rf.logger, persisterLogTopic)
+	logger := ExtendLoggerWithTopic(rf.logger, LoggerTopicPersister)
 
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
@@ -324,7 +324,7 @@ func (rf *Raft) Kill() {
 	defer rf.mu.Unlock()
 
 	// Your code here, if desired.
-	log := ExtendLoggerWithTopic(rf.logger, commonLogTopic)
+	log := ExtendLoggerWithTopic(rf.logger, LoggerTopicCommon)
 	log.Printf("The KILL signal")
 
 	log.Printf("State:"+

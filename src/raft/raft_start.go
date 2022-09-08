@@ -76,7 +76,7 @@ func (rf *Raft) StartWithCorrelationID(
 // the leader.
 func (rf *Raft) start(cID CorrelationID, command interface{}) (int, int, bool) {
 	ctx := AddCorrelationID(context.Background(), cID)
-	log := ExtendLogger(ctx, rf.logger, startLogTopic)
+	log := ExtendLogger(ctx, rf.logger, LoggerTopicStart)
 
 	log.Printf("Start call %+v", command)
 

@@ -6,11 +6,28 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"6.824/labrpc"
 	"6.824/raft"
 )
+
+func SN(rID string) int64 {
+	ps := strings.Split(rID, "_")
+	sn, _ := strconv.Atoi(ps[1])
+
+	return int64(sn)
+}
+
+func clerkID(rID string) int {
+	ps := strings.Split(rID, "_")
+	cID, _ := strconv.Atoi(ps[0])
+
+	return cID
+}
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
@@ -18,24 +35,28 @@ type Clerk struct {
 	log    *log.Logger
 	mu     sync.RWMutex
 	leader int
-	id     int
+	ID     int
+	rID    int64
 }
 
 func nrand() int64 {
 	max := big.NewInt(int64(1) << 62)
 	bigx, _ := rand.Int(rand.Reader, max)
 	x := bigx.Int64()
+
 	return x
 }
 
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	ck.id = int(nrand()) % 100
+	ck.ID = int(nrand()) % 10000
 
 	log := log.New(
-		os.Stdout, fmt.Sprintf("CK%d ", ck.id), log.Lshortfile|log.Lmicroseconds)
+		os.Stdout, fmt.Sprintf("CK%d ", ck.ID), log.Lshortfile|log.Lmicroseconds)
 	ck.log = raft.ExtendLoggerWithTopic(log, raft.LoggerTopicClerk)
+
+	log.Printf("New CK_%d", ck.ID)
 
 	return ck
 }
@@ -55,8 +76,11 @@ func (ck *Clerk) changeLeader() int {
 
 			return newl
 		}
-
 	}
+}
+
+func (ck *Clerk) nextRequestID() int64 {
+	return atomic.AddInt64(&ck.rID, 1)
 }
 
 func (ck *Clerk) Leader() int {
@@ -66,7 +90,6 @@ func (ck *Clerk) Leader() int {
 	return ck.leader
 }
 
-//
 // fetch the current value for a key.
 // returns "" if the key does not exist.
 // keeps trying forever in the face of all other errors.
@@ -77,7 +100,6 @@ func (ck *Clerk) Leader() int {
 // the types of args and reply (including whether they are pointers)
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
-//
 func (ck *Clerk) Get(key string) string {
 	var (
 		args = GetArgs{
@@ -89,7 +111,7 @@ func (ck *Clerk) Get(key string) string {
 	i := ck.Leader()
 
 	for {
-		requestID := fmt.Sprintf("%d_%d", ck.id, int(nrand()))
+		requestID := fmt.Sprintf("%d_%d", ck.ID, ck.nextRequestID())
 		args.CorrelationID = raft.NewCorrelationID()
 		args.RequestID = requestID
 
@@ -104,7 +126,7 @@ func (ck *Clerk) Get(key string) string {
 		}
 
 		log.Printf("Get <- S%d rID:%s K:%s V:%s ERR:%s",
-			i, key, requestID, reply.Value, reply.Err)
+			i, requestID, key, reply.Value, reply.Err)
 
 		switch {
 		case reply.Err == OK:
@@ -123,7 +145,6 @@ func (ck *Clerk) Get(key string) string {
 	}
 }
 
-//
 // shared by Put and Append.
 //
 // you can send an RPC with code like this:
@@ -132,10 +153,9 @@ func (ck *Clerk) Get(key string) string {
 // the types of args and reply (including whether they are pointers)
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
-//
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	var (
-		requestID = fmt.Sprintf("%d_%d", ck.id, int(nrand()))
+		requestID = fmt.Sprintf("%d_%d", ck.ID, ck.nextRequestID())
 		args      = PutAppendArgs{
 			RequestID: requestID,
 			Key:       key,
@@ -183,6 +203,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 func (ck *Clerk) Put(key string, value string) {
 	ck.PutAppend(key, value, "Put")
 }
+
 func (ck *Clerk) Append(key string, value string) {
 	ck.PutAppend(key, value, "Append")
 }

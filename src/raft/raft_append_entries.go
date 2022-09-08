@@ -32,9 +32,9 @@ func (rf *Raft) appendEntriesCreateLogger(args *AppendEntriesArgs) *log.Logger {
 	var log *log.Logger
 
 	if len(args.Entries) == 0 {
-		log = ExtendLoggerWithTopic(rf.logger, heartbeatingLogTopic)
+		log = ExtendLoggerWithTopic(rf.logger, LoggerTopicHeartbeating)
 	} else {
-		log = ExtendLoggerWithTopic(rf.logger, appendEntriesLogTopic)
+		log = ExtendLoggerWithTopic(rf.logger, LoggerTopicAppendEntries)
 	}
 
 	log = ExtendLoggerWithCorrelationID(log, args.CorrelationID)
@@ -61,7 +61,7 @@ func (rf *Raft) appendEntriesProcessArgs(
 		reply.ConflictIndex = rf.log.LastIndex()
 		reply.ConflictTerm = -1
 	case args.PrevLogIndex+len(args.Entries) <= rf.commitIndex():
-		log.Printf("Updated by someone else PLL:%d + len(Entrins):%d <= CI:%d",
+		log.Printf("Up-to-date PLL:%d + len(Entrins):%d <= CI:%d",
 			args.PrevLogIndex, len(args.Entries), rf.commitIndex())
 
 		reply.Success = true
@@ -85,7 +85,7 @@ func (rf *Raft) appendEntriesProcessArgs(
 
 		reply.ConflictTerm = rf.log.Term(args.PrevLogIndex)
 
-		for i := args.PrevLogIndex - 1; i > 0; i-- {
+		for i := args.PrevLogIndex - 1; i > rf.log.lastIncludedIndex; i-- {
 			if rf.log.Term(i) == reply.ConflictTerm {
 				continue
 			}
