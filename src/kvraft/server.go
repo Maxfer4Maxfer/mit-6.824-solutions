@@ -8,11 +8,14 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"6.824/labgob"
 	"6.824/labrpc"
 	"6.824/raft"
 )
+
+const cleanupStaleSessionCheckPeriod = 500 * time.Microsecond
 
 type OpType int
 
@@ -45,29 +48,13 @@ type Op struct {
 	Value     string
 }
 
-func (op Op) Equal(a *Op) bool {
-	if a == nil {
-		return false
-	}
-
-	switch {
-	case op.Type != a.Type:
-		return false
-	case op.Key != a.Key:
-		return false
-	case op.Value != a.Value:
-		return false
-	default:
-		return true
-	}
-}
-
 type resultFunc func(Err)
 
-type Request struct {
-	Op          *Op
+type Session struct {
+	// Op          *Op
 	Index       int
-	resultFuncs []resultFunc
+	Term        int
+	Subscribers []resultFunc
 	Done        bool
 }
 
@@ -87,7 +74,7 @@ type KVServer struct {
 	// last done request groupded by cleck IDs
 	dRequest map[int]int64
 
-	requests map[string]Request
+	sessions map[string]Session
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -170,15 +157,15 @@ func (kv *KVServer) callRaft(ctx context.Context, op Op) Err {
 		defer kv.mu.Unlock()
 
 		lastExecutedSN, ok := kv.dRequest[clerkID(op.RequestID)]
-		if ok && lastExecutedSN >= SN(op.RequestID) {
+		if ok && SN(op.RequestID) <= lastExecutedSN {
 			log.Printf("Request %s is old", op.RequestID)
 			resultFunc(OK)
 
 			return
 		}
 
-		r, ok := kv.requests[op.RequestID]
-		if ok && r.Done {
+		s, ok := kv.sessions[op.RequestID]
+		if ok && s.Done {
 			log.Printf("Request %s is already executed", op.RequestID)
 			resultFunc(OK)
 
@@ -199,12 +186,12 @@ func (kv *KVServer) callRaft(ctx context.Context, op Op) Err {
 				return
 			}
 
-			r.Op = &op
-			r.Index = idx
+			s.Term = term
+			s.Index = idx
 		}
 
-		r.resultFuncs = append(r.resultFuncs, resultFunc)
-		kv.requests[op.RequestID] = r
+		s.Subscribers = append(s.Subscribers, resultFunc)
+		kv.sessions[op.RequestID] = s
 	}()
 
 	wg.Wait()
@@ -214,45 +201,62 @@ func (kv *KVServer) callRaft(ctx context.Context, op Op) Err {
 	return result
 }
 
-func (kv *KVServer) informResult(requestID string, idx int, result Err) {
-	r, ok := kv.requests[requestID]
+func (kv *KVServer) informResult(requestID string, result Err) {
+	s, ok := kv.sessions[requestID]
 	if !ok {
 		return
 	}
 
 	kv.log.Printf("rID:%s I:%d D:%v len(chs):%d",
-		requestID, r.Index, r.Done, len(r.resultFuncs))
+		requestID, s.Index, s.Done, len(s.Subscribers))
 
-	for _, rf := range r.resultFuncs {
-		rf(result)
+	for _, sub := range s.Subscribers {
+		sub(result)
 	}
 
-	r.resultFuncs = []resultFunc{}
-	r.Index = idx
-	r.Done = true
-	kv.requests[requestID] = r
-	kv.dRequest[clerkID(requestID)] = SN(requestID)
+	s.Subscribers = s.Subscribers[:0]
+	kv.sessions[requestID] = s
 
-	for rID, e := range kv.requests {
-		if e.Index >= r.Index {
+	for rID, e := range kv.sessions {
+		if e.Index >= s.Index {
 			continue
 		}
 
-		if len(e.resultFuncs) == 0 {
+		if len(e.Subscribers) == 0 || e.Done {
 			continue
 		}
 
-		kv.log.Printf("Found the uncommitted predecessor %d < %d rID:%s Op:%+v",
-			e.Index, r.Index, rID, e.Op)
+		kv.log.Printf("Found the uncommitted predecessor %d < %d rID:%s",
+			e.Index, s.Index, rID)
 
-		for _, rf := range e.resultFuncs {
-			rf(ErrWrongLeader)
+		for _, sub := range e.Subscribers {
+			sub(ErrWrongLeader)
 		}
 
-		// e.resultFuncs = []resultFunc{}
-		// kv.requests[rID] = e
+		delete(kv.sessions, rID)
+	}
+}
 
-		delete(kv.requests, rID)
+func (kv *KVServer) cleanupStaleSessions() {
+	for {
+		kv.mu.Lock()
+		term, _ := kv.rf.GetState()
+
+		for rID, s := range kv.sessions {
+			if s.Term >= term || s.Done {
+				continue
+			}
+
+			kv.log.Printf("Found a stale session rID:%s T:%d CT:%d",
+				rID, s.Term, term)
+
+			kv.informResult(rID, ErrWrongLeader)
+
+			delete(kv.sessions, rID)
+		}
+		kv.mu.Unlock()
+
+		time.Sleep(cleanupStaleSessionCheckPeriod)
 	}
 }
 
@@ -297,30 +301,29 @@ func (kv *KVServer) processApplyCh() {
 		}
 
 		kv.mu.Lock()
-		var err Err
 
-		r, ok := kv.requests[op.RequestID]
+		duplicate := false
 
-		switch {
-		case ok && !op.Equal(r.Op):
-			kv.log.Printf("WRN not leader anymore Op != origOp %+v != %+v",
-				op, r.Op)
+		if s, ok := kv.sessions[op.RequestID]; ok && s.Done {
+			duplicate = true
+		} else {
+			s.Done = true
+			kv.sessions[op.RequestID] = s
+		}
 
-			err = ErrWrongLeader
-		// already done: duplicate entry in the log
-		case ok && r.Done:
-			err = OK
-		// first see or did not apply yet
-		default:
-			err = OK
-			r.Done = true
-			kv.requests[op.RequestID] = r
-			kv.dRequest[clerkID(op.RequestID)] = SN(op.RequestID)
+		if SN(op.RequestID) <= kv.dRequest[clerkID(op.RequestID)] {
+			duplicate = true
+		}
 
+		if !duplicate {
 			kv.processOp(op)
 		}
 
-		kv.informResult(op.RequestID, msg.CommandIndex, err)
+		if SN(op.RequestID) > kv.dRequest[clerkID(op.RequestID)] {
+			kv.dRequest[clerkID(op.RequestID)] = SN(op.RequestID)
+		}
+
+		kv.informResult(op.RequestID, OK)
 
 		if kv.maxraftstate != -1 && kv.maxraftstate <= kv.persister.RaftStateSize() {
 			kv.rf.Snapshot(msg.CommandIndex, kv.snapshot())
@@ -346,16 +349,13 @@ func (kv *KVServer) snapshot() []byte {
 	log.Printf("save len(dRequests):%d  len(snapshot):%d",
 		len(kv.dRequest), w.Len())
 
-	log.Printf("save len(store):%d len(dRequest):%d len(snapshot):%d",
-		len(kv.store), len(kv.requests), w.Len())
-
 	return w.Bytes()
 }
 
 func (kv *KVServer) readSnapshot(data []byte) {
 	log := raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopicSnapshot)
 
-	log.Printf("read len(snapshot):%d", len(data))
+	log.Printf("load len(snapshot):%d", len(data))
 
 	if len(data) == 0 {
 		return
@@ -377,10 +377,8 @@ func (kv *KVServer) readSnapshot(data []byte) {
 		panic(fmt.Sprintf("dRequests not found: %v", err))
 	}
 
-	log.Printf("load len(dRequests):%d", len(kv.dRequest))
-
-	log.Printf("load len(store):%d len(dRequests):%d len(snapshot):%d",
-		len(kv.store), len(kv.dRequest), len(data))
+	log.Printf("load len(dRequests):%d dRequests:%v",
+		len(kv.dRequest), kv.dRequest)
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -441,12 +439,13 @@ func StartKVServer(
 	kv.log = raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopicService)
 
 	kv.store = make(map[string]string)
-	kv.requests = make(map[string]Request)
+	kv.sessions = make(map[string]Session)
 	kv.dRequest = make(map[int]int64)
 
 	kv.readSnapshot(persister.ReadSnapshot())
 
 	go kv.processApplyCh()
+	go kv.cleanupStaleSessions()
 
 	kv.log.Printf("Started")
 
