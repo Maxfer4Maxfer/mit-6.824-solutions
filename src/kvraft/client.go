@@ -50,7 +50,7 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	ck.ID = int(nrand()) % 10000
+	ck.ID = int(nrand())
 
 	log := log.New(
 		os.Stdout, fmt.Sprintf("CK%d ", ck.ID), log.Lshortfile|log.Lmicroseconds)
