@@ -172,7 +172,9 @@ func (rf *Raft) applyLogProcessing() {
 
 	go func() {
 		for {
-			rf.commitIndexCond.Wait()
+			if rf.lastApplied() == rf.commitIndex() {
+				rf.commitIndexCond.Wait()
+			}
 
 			log.Printf("Apply %d -> %d", rf.lastApplied()+1, rf.commitIndex())
 
