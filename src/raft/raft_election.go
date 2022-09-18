@@ -169,33 +169,49 @@ func isLeaderElectionActive(ctx context.Context) bool {
 }
 
 func (rf *Raft) leaderElectionVotesCalculation(
-	log *log.Logger,
-	nVotedFor int,
-	nVoted int,
+	ctx context.Context, term int, resultCh chan int,
 ) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	nVoted := 1    // already voted for themselves
+	nVotedFor := 1 // already voted for themselves
 
-	log.Printf("(%d/%d) voted, %d for, %d against",
-		nVoted, len(rf.peers), nVotedFor, nVoted-nVotedFor)
+	for result := range resultCh {
+		nVotedFor += result
+		nVoted++
 
-	if nVotedFor > len(rf.peers)/2 || nVoted == len(rf.peers) {
-		if nVotedFor > len(rf.peers)/2 {
-			log.Printf("New leader T:%d", rf.currentTerm)
+		rf.mu.Lock()
 
-			for i := range rf.peers {
-				log.Printf("Set nextIndex for S%d to %d", i, rf.log.LastIndex()+1)
-				rf.nextIndex[i] = rf.log.LastIndex() + 1
-				rf.matchIndex[i] = 0
-			}
+		if !isLeaderElectionActive(ctx) {
+			log.Printf("Skip vote, election canceled T:%d", term)
+			rf.mu.Unlock()
 
-			rf.heartbeats.StartSending()
-			rf.leaderElection.StopTicker()
-		} else {
-			log.Print("Not luck, going to try the next time")
+			continue
 		}
 
-		rf.leaderElection.StopLeaderElection()
+		log.Printf("(%d/%d) voted, %d for, %d against",
+			nVoted, len(rf.peers), nVotedFor, nVoted-nVotedFor)
+
+		if nVotedFor > len(rf.peers)/2 || nVoted == len(rf.peers) {
+			if nVotedFor > len(rf.peers)/2 {
+				log.Printf("New leader T:%d", rf.currentTerm)
+
+				for i := range rf.peers {
+					log.Printf("Set nextIndex for S%d to %d",
+						i, rf.log.LastIndex()+1)
+
+					rf.nextIndex[i] = rf.log.LastIndex() + 1
+					rf.matchIndex[i] = 0
+				}
+
+				rf.heartbeats.StartSending()
+				rf.leaderElection.StopTicker()
+			} else {
+				log.Print("Not luck, going to try the next time")
+			}
+
+			rf.leaderElection.StopLeaderElection()
+		}
+
+		rf.mu.Unlock()
 	}
 }
 
@@ -229,23 +245,9 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 
 	rf.mu.Unlock()
 
-	nVoted := 1    // already voted for themselves
-	nVotedFor := 1 // already voted for themselves
-
 	resultCh := rf.leaderElectionSendRequestVotes(ctx, log, args.DeepCopy())
 
-	for result := range resultCh {
-		if !isLeaderElectionActive(ctx) {
-			log.Printf("Skip vote, election canceled T:%d", args.Term)
-
-			return
-		}
-
-		nVotedFor += result
-		nVoted++
-
-		rf.leaderElectionVotesCalculation(log, nVotedFor, nVoted)
-	}
+	rf.leaderElectionVotesCalculation(ctx, args.Term, resultCh)
 }
 
 func (rf *Raft) RequestVote(
