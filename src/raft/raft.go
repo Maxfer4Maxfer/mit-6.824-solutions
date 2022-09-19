@@ -120,6 +120,9 @@ func (rf *Raft) commitIndex() int {
 }
 
 func (rf *Raft) setCommitIndex(log *log.Logger, ci int) {
+	rf.commitIndexCond.L.Lock()
+	defer rf.commitIndexCond.L.Unlock()
+
 	if ci > rf.commitIndex() {
 		log.Printf("Increase commitIndex to %d", ci)
 
@@ -134,8 +137,6 @@ func (rf *Raft) applyLogProcessing() {
 	log := ExtendLoggerWithTopic(rf.logger, LoggerTopicApply)
 
 	rf.commitIndexCond = sync.NewCond(&sync.Mutex{})
-
-	rf.commitIndexCond.L.Lock()
 
 	go func() {
 		for msg := range rf.bufApplyCh {
@@ -165,13 +166,17 @@ func (rf *Raft) applyLogProcessing() {
 	go func() {
 		lastProcessed := 0
 		for {
-			if rf.lastApplied() == rf.commitIndex() {
+			rf.commitIndexCond.L.Lock()
+
+			for lastProcessed == rf.commitIndex() {
 				rf.commitIndexCond.Wait()
 			}
 
-			log.Printf("Apply %d -> %d", rf.lastApplied()+1, rf.commitIndex())
+			rf.commitIndexCond.L.Unlock()
 
-			for idx := rf.lastApplied() + 1; idx <= rf.commitIndex(); idx++ {
+			log.Printf("Apply %d -> %d", lastProcessed+1, rf.commitIndex())
+
+			for idx := lastProcessed + 1; idx <= rf.commitIndex(); idx++ {
 				rf.mu.Lock()
 				if idx <= rf.log.lastIncludedIndex {
 					rf.mu.Unlock()
@@ -199,6 +204,7 @@ func (rf *Raft) applyLogProcessing() {
 						CommandValid: true,
 						CommandIndex: idx,
 					}:
+						lastProcessed = idx
 						applied = true
 					default:
 						log.Printf("WRN encrease capacity of buffered applyCh: %d",

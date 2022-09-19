@@ -38,14 +38,20 @@ func (hbe *heartbeatsEngine) StartSending() {
 	hbe.log.Print("Start sending hearbeats")
 
 	atomic.StoreInt32(&hbe.run, 1)
+
+	hbe.cond.L.Lock()
 	hbe.cond.Broadcast()
+	hbe.cond.L.Unlock()
 }
 
 func (hbe *heartbeatsEngine) StopSending() {
 	if atomic.LoadInt32(&hbe.run) == 1 {
 		hbe.log.Print("Stop sending heartbeats")
 		atomic.StoreInt32(&hbe.run, 0)
+
+		hbe.cond.L.Lock()
 		hbe.cond.Broadcast()
+		hbe.cond.L.Unlock()
 	}
 }
 
@@ -75,11 +81,11 @@ func (hbe *heartbeatsEngine) processing() {
 		}
 	}
 
-	hbe.cond.L.Lock()
-
 	var cancelf context.CancelFunc
 
 	for {
+		hbe.cond.L.Lock()
+
 		switch {
 		case atomic.LoadInt32(&hbe.run) == 0:
 			if cancelf != nil {
@@ -96,6 +102,8 @@ func (hbe *heartbeatsEngine) processing() {
 
 			hbe.cond.Wait()
 		}
+
+		hbe.cond.L.Unlock()
 	}
 }
 
