@@ -98,7 +98,7 @@ type Raft struct {
 
 	// index of highest log entry applied to state machine
 	// initialized to 0, intcreases monotonically
-	vLastApplied int64
+	lastApplied int
 
 	// for each server, index of the next log entry to send to that server
 	// (initialized to leader last log index + 1)
@@ -113,14 +113,6 @@ type Raft struct {
 // Log is a shurtcut for rf.log.Log(i).
 func (rf *Raft) Log(idx int) LogEntry {
 	return rf.log.Log(idx)
-}
-
-func (rf *Raft) lastApplied() int {
-	return int(atomic.LoadInt64(&rf.vLastApplied))
-}
-
-func (rf *Raft) setLastApplied(v int) {
-	atomic.StoreInt64(&rf.vLastApplied, int64(v))
 }
 
 func (rf *Raft) commitIndex() int {
@@ -149,9 +141,9 @@ func (rf *Raft) applyLogProcessing() {
 		for msg := range rf.bufApplyCh {
 			// always apply incomming Snapshot
 			switch {
-			case msg.CommandValid && msg.CommandIndex <= rf.lastApplied():
+			case msg.CommandValid && msg.CommandIndex <= rf.lastApplied:
 				continue
-			case !msg.CommandValid && msg.SnapshotIndex <= rf.lastApplied():
+			case !msg.CommandValid && msg.SnapshotIndex <= rf.lastApplied:
 				continue
 			}
 
@@ -161,9 +153,9 @@ func (rf *Raft) applyLogProcessing() {
 
 			switch {
 			case msg.CommandValid:
-				rf.setLastApplied(msg.CommandIndex)
+				rf.lastApplied = msg.CommandIndex
 			case !msg.CommandValid:
-				rf.setLastApplied(msg.SnapshotIndex)
+				rf.lastApplied = msg.SnapshotIndex
 			}
 
 			log.Printf("CI:%d applied", msg.CommandIndex)
@@ -171,6 +163,7 @@ func (rf *Raft) applyLogProcessing() {
 	}()
 
 	go func() {
+		lastProcessed := 0
 		for {
 			if rf.lastApplied() == rf.commitIndex() {
 				rf.commitIndexCond.Wait()
@@ -330,9 +323,9 @@ func (rf *Raft) Kill() {
 	log.Printf("The KILL signal")
 
 	log.Printf("State:"+
-		"{L:%v CT:%d VF:%d CI:%d LA:%d len(log):%d LII:%d LTI:%d NI:%d MI:%d}",
-		rf.heartbeats.IsSendingInProgress(),
-		rf.currentTerm, rf.votedFor, rf.commitIndex(), rf.lastApplied(),
+		"{L:%v LA:%d CT:%d VF:%d CI:%d len(log):%d LII:%d LTI:%d NI:%d MI:%d}",
+		rf.heartbeats.IsSendingInProgress(), rf.lastApplied,
+		rf.currentTerm, rf.votedFor, rf.commitIndex(),
 		len(rf.log.log), rf.log.lastIncludedIndex, rf.log.lastIncludedTerm,
 		rf.nextIndex, rf.matchIndex,
 	)
