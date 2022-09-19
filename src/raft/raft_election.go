@@ -101,10 +101,10 @@ func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
 }
 
 func (rf *Raft) leaderElectionSendRequestVote(
-	ctx context.Context, log *log.Logger,
-	wg *sync.WaitGroup, args *RequestVoteArgs,
+	ctx context.Context, wg *sync.WaitGroup, args *RequestVoteArgs,
 	peerID int, resultCh chan int,
 ) {
+	log := ExtendLogger(ctx, rf.logger, LoggerTopicLeaderElection)
 	reply := &RequestVoteReply{}
 
 	defer wg.Done()
@@ -136,7 +136,7 @@ func (rf *Raft) leaderElectionSendRequestVote(
 }
 
 func (rf *Raft) leaderElectionSendRequestVotes(
-	ctx context.Context, log *log.Logger, args *RequestVoteArgs,
+	ctx context.Context, args *RequestVoteArgs,
 ) chan int {
 	resultCh := make(chan int) // 0 - votedFor; 1 - votedAgeinst
 	wg := &sync.WaitGroup{}
@@ -148,7 +148,7 @@ func (rf *Raft) leaderElectionSendRequestVotes(
 			continue
 		}
 
-		go rf.leaderElectionSendRequestVote(ctx, log, wg, args, peerID, resultCh)
+		go rf.leaderElectionSendRequestVote(ctx, wg, args, peerID, resultCh)
 	}
 
 	go func() {
@@ -171,6 +171,8 @@ func isLeaderElectionActive(ctx context.Context) bool {
 func (rf *Raft) leaderElectionVotesCalculation(
 	ctx context.Context, term int, resultCh chan int,
 ) {
+	log := ExtendLogger(ctx, rf.logger, LoggerTopicLeaderElection)
+
 	nVoted := 1    // already voted for themselves
 	nVotedFor := 1 // already voted for themselves
 
@@ -245,7 +247,7 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 
 	rf.mu.Unlock()
 
-	resultCh := rf.leaderElectionSendRequestVotes(ctx, log, args.DeepCopy())
+	resultCh := rf.leaderElectionSendRequestVotes(ctx, args.DeepCopy())
 
 	rf.leaderElectionVotesCalculation(ctx, args.Term, resultCh)
 }
