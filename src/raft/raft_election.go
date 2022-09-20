@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+func genElectionTimeout() time.Duration {
+	max := int64(electionTimeoutUpperBoundary)
+	min := int64(electionTimeoutLowerBoundary)
+
+	return time.Duration(rand.Int63n(max-min) + min)
+}
+
 type leaderElectionEngine struct {
 	log                *log.Logger
 	mu                 *sync.Mutex
@@ -15,31 +22,45 @@ type leaderElectionEngine struct {
 	resetTickerCh      chan struct{}
 	electionCancelFunc context.CancelFunc
 	leaderElectionFunc func(ctx context.Context)
+	electionTimeout    time.Duration
+	ticker             *time.Ticker
 }
 
 func initLeaderElectionEngine(
 	logger *log.Logger,
 	leaderElectionFunc func(context.Context),
 ) *leaderElectionEngine {
+
 	lee := &leaderElectionEngine{
 		log:                ExtendLoggerWithTopic(logger, LoggerTopicLeaderElection),
 		mu:                 &sync.Mutex{},
 		resetTickerCh:      make(chan struct{}),
 		stopTickerCh:       make(chan struct{}),
 		leaderElectionFunc: leaderElectionFunc,
+		electionTimeout:    genElectionTimeout(),
 	}
 
-	go lee.ticker(logger)
+	lee.ticker = time.NewTicker(lee.electionTimeout)
+
+	go lee.proccess(logger)
 
 	return lee
 }
 
 func (lee *leaderElectionEngine) ResetTicker() {
-	lee.resetTickerCh <- struct{}{}
+	lee.mu.Lock()
+	defer lee.mu.Unlock()
+
+	lee.ticker.Reset(lee.electionTimeout)
+	lee.log.Printf("Reset the election ticker %v", lee.electionTimeout)
 }
 
 func (lee *leaderElectionEngine) StopTicker() {
-	lee.stopTickerCh <- struct{}{}
+	lee.mu.Lock()
+	defer lee.mu.Unlock()
+
+	lee.ticker.Stop()
+	lee.log.Printf("Stop the election ticker")
 }
 
 func (lee *leaderElectionEngine) StopLeaderElection() {
@@ -53,50 +74,27 @@ func (lee *leaderElectionEngine) StopLeaderElection() {
 
 // The ticker go routine starts a new election if this peer hasn't received
 // heartsbeats recently.
-func (lee *leaderElectionEngine) ticker(logger *log.Logger) {
-	log := ExtendLoggerWithTopic(logger, LoggerTopicTicker)
+func (lee *leaderElectionEngine) proccess(logger *log.Logger) {
+	for range lee.ticker.C {
+		correlationID := NewCorrelationID()
+		llog := ExtendLoggerWithCorrelationID(lee.log, correlationID)
 
-	max := int64(electionTimeoutUpperBoundary)
-	min := int64(electionTimeoutLowerBoundary)
-	et := time.Duration(rand.Int63n(max-min) + min)
-	electionTimeoutCh := make(chan time.Duration)
+		llog.Printf("Did not see a leader to much")
 
-	ticker := time.NewTicker(et)
+		lee.StopLeaderElection()
 
-	go func() {
-		for range ticker.C {
-			correlationID := NewCorrelationID()
-			llog := ExtendLoggerWithCorrelationID(log, correlationID)
+		ctx, cancel := context.WithCancel(context.Background())
+		ctx = AddCorrelationID(ctx, correlationID)
 
-			llog.Printf("Did not see a leader to much")
+		lee.mu.Lock()
+		lee.electionCancelFunc = cancel
+		lee.electionTimeout = genElectionTimeout()
+		lee.ticker.Reset(lee.electionTimeout)
+		llog.Printf("Set a new election timeout %v", lee.electionTimeout)
+		lee.mu.Unlock()
 
-			lee.StopLeaderElection()
+		go lee.leaderElectionFunc(ctx)
 
-			ctx, cancel := context.WithCancel(context.Background())
-			ctx = AddCorrelationID(ctx, correlationID)
-
-			lee.mu.Lock()
-			lee.electionCancelFunc = cancel
-			lee.mu.Unlock()
-
-			go lee.leaderElectionFunc(ctx)
-
-			electionTimeoutCh <- time.Duration(rand.Int63n(max-min) + min)
-		}
-	}()
-
-	for {
-		select {
-		case <-lee.stopTickerCh:
-			ticker.Stop()
-			log.Printf("Stop the election ticker")
-		case <-lee.resetTickerCh:
-			ticker.Reset(et)
-			log.Printf("Reset the election ticker %v", et)
-		case et = <-electionTimeoutCh:
-			log.Printf("Set a new election timeout %v", et)
-			ticker.Reset(et)
-		}
 	}
 }
 
@@ -264,7 +262,7 @@ func (rf *Raft) RequestVote(
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	log.Printf("Current State: {T:%d, LLI:%d, LLT:%d}",
+	log.Printf("Current State: {T:%d, LI:%d, LLT:%d}",
 		rf.currentTerm, rf.log.LastIndex(), rf.log.Term(rf.log.LastIndex()))
 
 	rf.processIncomingTerm(ctx, log, args.CandidateID, args.Term)

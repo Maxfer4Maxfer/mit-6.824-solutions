@@ -329,8 +329,8 @@ func (rf *Raft) Kill() {
 	log.Printf("The KILL signal")
 
 	log.Printf("State:"+
-		"{L:%v LA:%d CT:%d VF:%d CI:%d len(log):%d LII:%d LTI:%d NI:%d MI:%d}",
-		rf.heartbeats.IsSendingInProgress(), rf.lastApplied,
+		"{L:%v CT:%d VF:%d CI:%d len(log):%d LII:%d LTI:%d NI:%d MI:%d}",
+		rf.heartbeats.IsSendingInProgress(),
 		rf.currentTerm, rf.votedFor, rf.commitIndex(),
 		len(rf.log.log), rf.log.lastIncludedIndex, rf.log.lastIncludedTerm,
 		rf.nextIndex, rf.matchIndex,
