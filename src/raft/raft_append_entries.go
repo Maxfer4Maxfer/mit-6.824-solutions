@@ -94,6 +94,10 @@ func (rf *Raft) appendEntriesProcessArgs(
 
 			break
 		}
+
+		if reply.ConflictIndex == 0 {
+			reply.ConflictIndex = rf.log.lastIncludedIndex + 1
+		}
 	default:
 		reply.Success = true
 
