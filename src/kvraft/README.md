@@ -1,3 +1,9 @@
+## MIT 6.824 Distributed Systems: Lab 3 Fault-tolerant Key/Value Service 
+
+Solution for [Lab 3: Fault-tolerant Key/Value Service](https://pdos.csail.mit.edu/6.824/labs/lab-kvraft.html)
+
+Tests:
+```sh
 ❯ time python3 mtests.py --timeout 1m --workers 4 -n 40 3A 3B
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┓
 ┃ Test                                                           ┃ Failed ┃ Total ┃         Time ┃
@@ -27,6 +33,15 @@
 │ TestSnapshotUnreliableRecoverConcurrentPartitionLinearizable3B │      0 │    40 │ 30.31 ± 0.67 │
 └────────────────────────────────────────────────────────────────┴────────┴───────┴──────────────┘
 14426.18s user 2293.30s system 370% cpu 1:15:10.98 total
+```
+
+Environment:
+```sh
+❯ cat /etc/lsb-release
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=22.04
+DISTRIB_CODENAME=jammy
+DISTRIB_DESCRIPTION="Ubuntu 22.04 LTS"
 
 ❯ cat /proc/cpuinfo | egrep 'processor|venfor_id|model|cpu MHz|cache|cpu cores' | sort | uniq
 cache_alignment : 64
@@ -39,5 +54,4 @@ processor       : 0
 processor       : 1
 processor       : 2
 processor       : 3
-
-
+```
