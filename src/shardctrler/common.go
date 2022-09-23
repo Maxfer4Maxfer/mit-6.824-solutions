@@ -1,5 +1,7 @@
 package shardctrler
 
+import "6.824/raft"
+
 //
 // Shard controler: assigns shards to replication groups.
 //
@@ -21,6 +23,8 @@ package shardctrler
 const NShards = 10
 
 // A configuration -- an assignment of shards to groups.
+// Each configuration describes a set of replica groups
+// and an assignment of shards to replica groups.
 // Please don't change this.
 type Config struct {
 	Num    int              // config number
@@ -28,14 +32,48 @@ type Config struct {
 	Groups map[int][]string // gid -> servers[]
 }
 
-const (
-	OK = "OK"
-)
+func (c *Config) DeepCopy() Config {
+
+	var shards [NShards]int
+
+	for i := range c.Shards {
+		shards[i] = c.Shards[i]
+	}
+
+	groups := make(map[int][]string, len(c.Shards))
+
+	for gid, servers := range c.Groups {
+		ss := make([]string, len(servers))
+		copy(ss, servers)
+		groups[gid] = ss
+	}
+
+	return Config{
+		Num:    c.Num,
+		Shards: shards,
+		Groups: groups,
+	}
+}
+
+// Config {
+// Num: 1,
+//          0 1 2 3 4 5 6 7 8 9
+// Shards: [1 1 1 1 1 2 2 2 2 0]
+// Groups: {1:[s0, s1, s3], 2:[s2, s4, s5]}
+// }
 
 type Err string
 
+const (
+	OK             Err = "OK"
+	ErrWrongLeader Err = "ErrWrongLeader"
+	ErrNoKey       Err = "ErrNoKey"
+)
+
 type JoinArgs struct {
-	Servers map[int][]string // new GID -> servers mappings
+	Servers       map[int][]string // new GID -> servers mappings
+	CorrelationID raft.CorrelationID
+	RequestID     string
 }
 
 type JoinReply struct {
@@ -44,7 +82,9 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
-	GIDs []int
+	GIDs          []int
+	CorrelationID raft.CorrelationID
+	RequestID     string
 }
 
 type LeaveReply struct {
@@ -53,8 +93,10 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
-	Shard int
-	GID   int
+	Shard         int
+	GID           int
+	CorrelationID raft.CorrelationID
+	RequestID     string
 }
 
 type MoveReply struct {
@@ -63,7 +105,9 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
-	Num int // desired config number
+	Num           int // desired config number
+	CorrelationID raft.CorrelationID
+	RequestID     string
 }
 
 type QueryReply struct {
