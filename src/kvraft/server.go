@@ -51,7 +51,6 @@ type Op struct {
 type resultFunc func(Err)
 
 type Session struct {
-	// Op          *Op
 	Index       int
 	Term        int
 	Subscribers []resultFunc
@@ -71,9 +70,11 @@ type KVServer struct {
 	// Your definitions here.
 	log   *log.Logger
 	store map[string]string
+
 	// last done request groupded by cleck IDs
 	dRequest map[int]int64
 
+	// active sessins waited for responce from applyCh 
 	sessions map[string]Session
 }
 
@@ -281,7 +282,7 @@ func (kv *KVServer) processApplyCh() {
 	for msg := range kv.applyCh {
 		// Snapshot case
 		if !msg.CommandValid {
-			kv.log.Printf("Incoming stapshot ST:%d, SI:%d, len:%d",
+			kv.log.Printf("Incoming snapshot ST:%d, SI:%d, len:%d",
 				msg.SnapshotTerm, msg.SnapshotIndex, len(msg.Snapshot))
 
 			kv.readSnapshot(msg.Snapshot)
