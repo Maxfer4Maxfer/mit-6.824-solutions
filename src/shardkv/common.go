@@ -1,5 +1,9 @@
 package shardkv
 
+import (
+	"6.824/raft"
+)
+
 //
 // Sharded key/value server.
 // Lots of replica groups, each running Raft.
@@ -9,14 +13,17 @@ package shardkv
 // You will have to modify these definitions.
 //
 
-const (
-	OK             = "OK"
-	ErrNoKey       = "ErrNoKey"
-	ErrWrongGroup  = "ErrWrongGroup"
-	ErrWrongLeader = "ErrWrongLeader"
-)
-
 type Err string
+
+const (
+	OK                   Err = "OK"
+	ErrInternal          Err = "ErrInternal"
+	ErrNoKey             Err = "ErrNoKey"
+	ErrWrongGroup        Err = "ErrWrongGroup"
+	ErrWrongLeader       Err = "ErrWrongLeader"
+	ErrWrongOpType       Err = "ErrWrongOpType"
+	ErrWrongConfigNumber Err = "ErrWrongConfigNumber"
+)
 
 // Put or Append
 type PutAppendArgs struct {
@@ -27,6 +34,8 @@ type PutAppendArgs struct {
 	// You'll have to add definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	CorrelationID raft.CorrelationID
+	RequestID     string
 }
 
 type PutAppendReply struct {
@@ -34,11 +43,23 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	Key string
-	// You'll have to add definitions here.
+	Key           string
+	CorrelationID raft.CorrelationID
+	RequestID     string
 }
 
 type GetReply struct {
 	Err   Err
 	Value string
+}
+
+type TransferArgs struct {
+	ConfigNum     int
+	KeyValues     map[string]string
+	CorrelationID raft.CorrelationID
+	RequestID     string
+}
+
+type TransferReply struct {
+	Err Err
 }

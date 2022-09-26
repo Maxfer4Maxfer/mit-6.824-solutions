@@ -1,15 +1,18 @@
 package shardkv
 
-import "6.824/porcupine"
-import "6.824/models"
-import "testing"
-import "strconv"
-import "time"
-import "fmt"
-import "sync/atomic"
-import "sync"
-import "math/rand"
-import "io/ioutil"
+import (
+	"fmt"
+	"io/ioutil"
+	"math/rand"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"6.824/models"
+	"6.824/porcupine"
+)
 
 const linearizabilityCheckTimeout = 1 * time.Second
 
@@ -110,26 +113,32 @@ func TestJoinLeave(t *testing.T) {
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i) // ensure multiple shards
 		va[i] = randstring(5)
+		fmt.Printf("Test: put %d/%d %s %s\n", i, n, ka[i], va[i])
 		ck.Put(ka[i], va[i])
 	}
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d \n", i, n)
 		check(t, ck, ka[i], va[i])
 	}
 
+	fmt.Printf("Test: join 1\n")
 	cfg.join(1)
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 		x := randstring(5)
+		fmt.Printf("Test: append %d/%d %s\n", i, n, x)
 		ck.Append(ka[i], x)
 		va[i] += x
 	}
 
+	fmt.Printf("Test: join 0\n")
 	cfg.leave(0)
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 		x := randstring(5)
+		fmt.Printf("Test: append %d/%d %s\n", i, n, x)
 		ck.Append(ka[i], x)
 		va[i] += x
 	}
@@ -138,9 +147,11 @@ func TestJoinLeave(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	cfg.checklogs()
+	fmt.Printf("Test: shotdown 0\n")
 	cfg.ShutdownGroup(0)
 
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d \n", i, n)
 		check(t, ck, ka[i], va[i])
 	}
 
