@@ -91,7 +91,7 @@ type ShardKV struct {
 	// 0 -> waiting for transfering (set by new config)
 	// 1 -> transfered before see new config (set by transfer)
 	// 2 -> need to be cleaned after processing new config  (set by new config)
-	lockedGIDs map[int]int
+	lockedGroups map[int]int
 }
 
 func (kv *ShardKV) isRightShard(key string) bool {
@@ -369,7 +369,7 @@ func (kv *ShardKV) processOp(op Op) Err {
 			OpTypeAppend, op.RequestID, op.Key, v, op.Value)
 	case OpTypeTransfer:
 		kv.log.Printf("Apply Transfer rID:%s len(KVs):%d LS:%v LIDs:%v",
-			op.RequestID, len(op.KeyValues), kv.lockedShards, kv.lockedGIDs)
+			op.RequestID, len(op.KeyValues), kv.lockedShards, kv.lockedGroups)
 
 		for key, value := range op.KeyValues {
 			kv.store[key] = value
@@ -386,17 +386,17 @@ func (kv *ShardKV) processOp(op Op) Err {
 					}
 				}
 
-				delete(kv.lockedGIDs, gid)
+				delete(kv.lockedGroups, gid)
 			} else {
 				gid := kv.config.Shards[key2shard(key)]
-				kv.lockedGIDs[gid] = 1
+				kv.lockedGroups[gid] = 1
 			}
 
 			break
 		}
 
-		kv.log.Printf("Apply Transfer rID:%s len(KVs):%d LS:%v LIDs:%v",
-			op.RequestID, len(op.KeyValues), kv.lockedShards, kv.lockedGIDs)
+		kv.log.Printf("Apply Transfer rID:%s len(KVs):%d LS:%v LG:%v",
+			op.RequestID, len(op.KeyValues), kv.lockedShards, kv.lockedGroups)
 	}
 
 	return OK
@@ -470,14 +470,22 @@ func (kv *ShardKV) snapshot() []byte {
 	e := labgob.NewEncoder(w)
 
 	e.Encode(kv.store)
-
-	log.Printf("save len(store):%d len(snapshot):%d",
-		len(kv.store), w.Len())
+	log.Printf("save len(store):%d len(snapshot):%d", len(kv.store), w.Len())
 
 	e.Encode(kv.dRequest)
-
 	log.Printf("save len(dRequests):%d  len(snapshot):%d",
 		len(kv.dRequest), w.Len())
+
+	e.Encode(kv.config)
+	log.Printf("save config:%+v  len(snapshot):%d", kv.config, w.Len())
+
+	e.Encode(kv.lockedShards)
+	log.Printf("save len(lockedShards):%d  len(snapshot):%d",
+		len(kv.lockedShards), w.Len())
+
+	e.Encode(kv.lockedGroups)
+	log.Printf("save len(lockedGroups):%d  len(snapshot):%d",
+		len(kv.lockedGroups), w.Len())
 
 	return w.Bytes()
 }
@@ -509,6 +517,26 @@ func (kv *ShardKV) readSnapshot(data []byte) {
 
 	log.Printf("load len(dRequests):%d dRequests:%v",
 		len(kv.dRequest), kv.dRequest)
+
+	if err := d.Decode(&kv.config); err != nil {
+		panic(fmt.Sprintf("config not found: %v", err))
+	}
+
+	log.Printf("load config:%+v", kv.config)
+
+	if err := d.Decode(&kv.lockedShards); err != nil {
+		panic(fmt.Sprintf("lockedShards not found: %v", err))
+	}
+
+	log.Printf("load len(lockedShards):%d lockedShards:%v",
+		len(kv.lockedShards), kv.lockedShards)
+
+	if err := d.Decode(&kv.lockedGroups); err != nil {
+		panic(fmt.Sprintf("lockedGroups not found: %v", err))
+	}
+
+	log.Printf("load len(lockedGroups):%d lockedGroups:%v",
+		len(kv.lockedGroups), kv.lockedGroups)
 }
 
 func (kv *ShardKV) refreshConfig() {
@@ -561,23 +589,23 @@ func (kv *ShardKV) refreshConfig() {
 				nConfig.Shards[sid] == kv.gid:
 				gid := oConfig.Shards[sid]
 
-				if v, ok := kv.lockedGIDs[gid]; ok && v != 0 {
+				if v, ok := kv.lockedGroups[gid]; ok && v != 0 {
 					switch v {
 					case 1:
-						kv.lockedGIDs[oConfig.Shards[sid]] = 2
+						kv.lockedGroups[oConfig.Shards[sid]] = 2
 					case 2:
 						continue
 					}
 				} else {
-					kv.lockedGIDs[gid] = 0
+					kv.lockedGroups[gid] = 0
 					kv.lockedShards[sid] = oConfig.Shards[sid]
 				}
 			}
 		}
 
-		for k, v := range kv.lockedGIDs {
+		for k, v := range kv.lockedGroups {
 			if v == 2 {
-				delete(kv.lockedGIDs, k)
+				delete(kv.lockedGroups, k)
 			}
 		}
 
@@ -715,7 +743,7 @@ func StartServer(
 	kv.sessions = make(map[string]Session)
 	kv.dRequest = make(map[int]int64)
 	kv.lockedShards = make(map[int]int)
-	kv.lockedGIDs = make(map[int]int)
+	kv.lockedGroups = make(map[int]int)
 
 	kv.readSnapshot(persister.ReadSnapshot())
 

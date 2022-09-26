@@ -166,6 +166,7 @@ func TestSnapshot(t *testing.T) {
 
 	ck := cfg.makeClient()
 
+	fmt.Printf("Test: join 0\n")
 	cfg.join(0)
 
 	n := 30
@@ -174,29 +175,38 @@ func TestSnapshot(t *testing.T) {
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i) // ensure multiple shards
 		va[i] = randstring(20)
+		fmt.Printf("Test: put %d/%d k:%s v%s\n", i, n, ka[i], va[i])
 		ck.Put(ka[i], va[i])
 	}
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d\n", i, n)
 		check(t, ck, ka[i], va[i])
 	}
 
+	fmt.Printf("Test: join 1\n")
 	cfg.join(1)
+	fmt.Printf("Test: join 2\n")
 	cfg.join(2)
+	fmt.Printf("Test: leave 0\n")
 	cfg.leave(0)
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 		x := randstring(20)
+		fmt.Printf("Test: append %d/%d k:%s v%s\n", i, n, ka[i], x)
 		ck.Append(ka[i], x)
 		va[i] += x
 	}
 
+	fmt.Printf("Test: leave 1\n")
 	cfg.leave(1)
+	fmt.Printf("Test: join 0\n")
 	cfg.join(0)
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 		x := randstring(20)
+		fmt.Printf("Test: append %d/%d k:%s v%s\n", i, n, ka[i], x)
 		ck.Append(ka[i], x)
 		va[i] += x
 	}
@@ -204,6 +214,7 @@ func TestSnapshot(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d\n", i, n)
 		check(t, ck, ka[i], va[i])
 	}
 
@@ -211,15 +222,22 @@ func TestSnapshot(t *testing.T) {
 
 	cfg.checklogs()
 
+	fmt.Printf("Test: shutdown group 0\n")
 	cfg.ShutdownGroup(0)
+	fmt.Printf("Test: shutdown group 1\n")
 	cfg.ShutdownGroup(1)
+	fmt.Printf("Test: shutdown group 2\n")
 	cfg.ShutdownGroup(2)
 
+	fmt.Printf("Test: start group 0\n")
 	cfg.StartGroup(0)
+	fmt.Printf("Test: start group 1\n")
 	cfg.StartGroup(1)
+	fmt.Printf("Test: start group 2\n")
 	cfg.StartGroup(2)
 
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d\n", i, n)
 		check(t, ck, ka[i], va[i])
 	}
 
