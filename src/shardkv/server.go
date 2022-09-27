@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ const (
 	OpTypeAppend
 	OpTypeGet
 	OpTypeTransfer
+	OpTypeTransferCompleted
 )
 
 func (ot OpType) String() string {
@@ -39,6 +41,8 @@ func (ot OpType) String() string {
 		return "Get"
 	case OpTypeTransfer:
 		return "Transfer"
+	case OpTypeTransferCompleted:
+		return "Transfer_Completed"
 	default:
 		return "UNSUPPORT_OP_TYPE"
 	}
@@ -49,6 +53,7 @@ type Op struct {
 	Type      OpType
 	Key       string
 	Value     string
+	ConfigNum int
 	KeyValues map[string]string
 }
 
@@ -84,25 +89,22 @@ type ShardKV struct {
 	// active sessins waited for responce from applyCh
 	sessions map[string]Session
 
-	lockedShards map[int]int // map[shardID]GID
-
-	// map[GID]int
-	// holds on state of transferaed GID during reconfiguration
-	// 0 -> waiting for transfering (set by new config)
-	// 1 -> transfered before see new config (set by transfer)
-	// 2 -> need to be cleaned after processing new config  (set by new config)
-	lockedGroups map[int]int
+	reconfig map[int]Reconfig
 }
 
-func (kv *ShardKV) isRightShard(key string) bool {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
+type TransferStatus int
 
-	if kv.config.Shards[key2shard(key)] == kv.gid {
-		return true
-	}
+const (
+	// waiting for transfering (set by new config)
+	transferStatusWaiting TransferStatus = iota
+	// transfered (set by transfer)
+	transferStatusApplied
+)
 
-	return false
+type Reconfig struct {
+	Completed    bool
+	LockedShards map[int]int // sid -> gid
+	LockedGroups map[int]TransferStatus
 }
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
@@ -166,31 +168,15 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	reply.Err = kv.callRaft(ctx, op)
 }
 
-func (kv *ShardKV) isRightConfig(cn int) bool {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	if kv.config.Num == cn {
-		return true
-	}
-
-	return false
-}
-
 func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 	log := raft.ExtendLoggerWithCorrelationID(kv.log, args.CorrelationID)
 
 	log.Printf("-> Transfer rID:%s CN:%d len(KVs):%d",
 		args.RequestID, args.ConfigNum, len(args.KeyValues))
 
-	if !kv.isRightConfig(args.ConfigNum) {
-		reply.Err = ErrWrongConfigNumber
-
-		return
-	}
-
 	op := Op{
 		RequestID: args.RequestID,
+		ConfigNum: args.ConfigNum,
 		KeyValues: args.KeyValues,
 		Type:      OpTypeTransfer,
 	}
@@ -198,6 +184,27 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 	ctx := raft.AddCorrelationID(context.Background(), args.CorrelationID)
 
 	reply.Err = kv.callRaft(ctx, op)
+}
+
+func (kv *ShardKV) transferCompleted(configNum int) {
+	var (
+		correlationID = raft.NewCorrelationID()
+		ctx           = raft.AddCorrelationID(context.Background(), correlationID)
+		log           = raft.ExtendLoggerWithCorrelationID(kv.log, correlationID)
+		requestID     = fmt.Sprintf("%d%d_%d", kv.gid, kv.me, configNum)
+		op            = Op{
+			RequestID: requestID,
+			ConfigNum: configNum,
+			Type:      OpTypeTransferCompleted,
+		}
+	)
+
+	log.Printf("-> TransferCompleted rID:%s CN:%v", requestID, configNum)
+
+	err := kv.callRaft(ctx, op)
+
+	log.Printf("<- TransferCompleted rID:%s CN:%v Err:%v",
+		requestID, configNum, err)
 }
 
 func (kv *ShardKV) callRaft(ctx context.Context, op Op) Err {
@@ -228,15 +235,17 @@ func (kv *ShardKV) callRaft(ctx context.Context, op Op) Err {
 
 		if op.Type == OpTypePut || op.Type == OpTypeAppend || op.Type == OpTypeGet {
 			if kv.config.Shards[key2shard(op.Key)] != kv.gid {
-				log.Printf("Wrong shard group RGUID:%d != GID:%d",
-					kv.config.Shards[key2shard(op.Key)], kv.gid)
+				log.Printf("Wrong shard group RGUID:%d != GID:%d rID:%v",
+					kv.config.Shards[key2shard(op.Key)], kv.gid, op.RequestID)
+
 				resultFunc(ErrWrongGroup)
 
 				return
 			}
 
-			if pguid, ok := kv.lockedShards[key2shard(op.Key)]; ok {
-				log.Printf("Waiting transfer from previous group GID:%d", pguid)
+			lockedShards := kv.reconfig[kv.config.Num].LockedShards
+			if gid, ok := lockedShards[key2shard(op.Key)]; ok && gid != -1 {
+				log.Printf("Waiting transfer from previous group GID:%d", gid)
 
 				resultFunc(ErrWrongGroup)
 
@@ -368,35 +377,75 @@ func (kv *ShardKV) processOp(op Op) Err {
 		kv.log.Printf("Apply %s rID:%s K:%s OV:%s AV:%s",
 			OpTypeAppend, op.RequestID, op.Key, v, op.Value)
 	case OpTypeTransfer:
-		kv.log.Printf("Apply Transfer rID:%s len(KVs):%d LS:%v LIDs:%v",
-			op.RequestID, len(op.KeyValues), kv.lockedShards, kv.lockedGroups)
+		if _, ok := kv.reconfig[op.ConfigNum]; !ok {
+			kv.reconfig[op.ConfigNum] = Reconfig{
+				LockedShards: make(map[int]int),
+				LockedGroups: make(map[int]TransferStatus),
+			}
+		}
+
+		lockedShards := kv.reconfig[op.ConfigNum].LockedShards
+		lockedGroups := kv.reconfig[op.ConfigNum].LockedGroups
+
+		kv.log.Printf("Apply Transfer rID:%s CN:%d len(KVs):%d LS:%v LD:%v",
+			op.RequestID, op.ConfigNum, len(op.KeyValues),
+			lockedShards, lockedGroups)
+
+		for key := range op.KeyValues {
+			gid, sok := lockedShards[key2shard(key)]
+			status, gok := lockedGroups[gid]
+
+			if (sok && gid == -1) ||
+				(sok && gok && status == transferStatusApplied) {
+				kv.log.Printf("Apply Transfer dublicate ID:%s CN:%d",
+					op.RequestID, op.ConfigNum)
+
+				return OK
+			}
+
+			break
+		}
 
 		for key, value := range op.KeyValues {
 			kv.store[key] = value
 		}
 
 		for key, _ := range op.KeyValues {
-			gid, ok := kv.lockedShards[key2shard(key)]
-			kv.log.Printf("Apply Transfer HERE:%v - %v", key2shard(key), gid)
+			gid, ok := lockedShards[key2shard(key)]
 
 			if ok {
-				for sid, pgid := range kv.lockedShards {
+				for sid, pgid := range lockedShards {
 					if gid == pgid {
-						delete(kv.lockedShards, sid)
+						lockedShards[sid] = -1
 					}
 				}
 
-				delete(kv.lockedGroups, gid)
+				lockedGroups[gid] = transferStatusApplied
 			} else {
-				gid := kv.config.Shards[key2shard(key)]
-				kv.lockedGroups[gid] = 1
+				// need to mark with -1 to identefy that transfer already done
+				lockedShards[key2shard(key)] = -1
 			}
 
 			break
 		}
 
-		kv.log.Printf("Apply Transfer rID:%s len(KVs):%d LS:%v LG:%v",
-			op.RequestID, len(op.KeyValues), kv.lockedShards, kv.lockedGroups)
+		kv.log.Printf("Apply Transfer rID:%s CN:%d len(KVs):%d LS:%v LG:%v",
+			op.RequestID, op.ConfigNum, len(op.KeyValues),
+			lockedShards, lockedGroups)
+	case OpTypeTransferCompleted:
+		if _, ok := kv.reconfig[op.ConfigNum]; !ok {
+			kv.reconfig[op.ConfigNum] = Reconfig{
+				LockedShards: make(map[int]int),
+				LockedGroups: make(map[int]TransferStatus),
+			}
+		}
+
+		r := kv.reconfig[op.ConfigNum]
+		r.Completed = true
+		kv.reconfig[op.ConfigNum] = r
+
+		kv.log.Printf("Apply TransferCompleted rID:%s CN:%d",
+			op.RequestID, op.ConfigNum)
 	}
 
 	return OK
@@ -429,11 +478,9 @@ func (kv *ShardKV) processApplyCh() {
 
 		duplicate := false
 
-		if s, ok := kv.sessions[op.RequestID]; ok && s.Done {
+		s, ok := kv.sessions[op.RequestID]
+		if ok && s.Done {
 			duplicate = true
-		} else {
-			s.Done = true
-			kv.sessions[op.RequestID] = s
 		}
 
 		if SN(op.RequestID) <= kv.dRequest[clerkID(op.RequestID)] {
@@ -452,6 +499,9 @@ func (kv *ShardKV) processApplyCh() {
 		if SN(op.RequestID) > kv.dRequest[clerkID(op.RequestID)] {
 			kv.dRequest[clerkID(op.RequestID)] = SN(op.RequestID)
 		}
+
+		s.Done = true
+		kv.sessions[op.RequestID] = s
 
 		kv.informResult(op.RequestID, OK)
 
@@ -479,13 +529,9 @@ func (kv *ShardKV) snapshot() []byte {
 	e.Encode(kv.config)
 	log.Printf("save config:%+v  len(snapshot):%d", kv.config, w.Len())
 
-	e.Encode(kv.lockedShards)
-	log.Printf("save len(lockedShards):%d  len(snapshot):%d",
-		len(kv.lockedShards), w.Len())
-
-	e.Encode(kv.lockedGroups)
-	log.Printf("save len(lockedGroups):%d  len(snapshot):%d",
-		len(kv.lockedGroups), w.Len())
+	e.Encode(kv.reconfig)
+	log.Printf("save len(reconfig):%d  len(snapshot):%d",
+		len(kv.reconfig), w.Len())
 
 	return w.Bytes()
 }
@@ -524,53 +570,153 @@ func (kv *ShardKV) readSnapshot(data []byte) {
 
 	log.Printf("load config:%+v", kv.config)
 
-	if err := d.Decode(&kv.lockedShards); err != nil {
-		panic(fmt.Sprintf("lockedShards not found: %v", err))
+	if err := d.Decode(&kv.reconfig); err != nil {
+		panic(fmt.Sprintf("reconfig not found: %v", err))
 	}
 
-	log.Printf("load len(lockedShards):%d lockedShards:%v",
-		len(kv.lockedShards), kv.lockedShards)
+	log.Printf("load len(reconfig):%d reconfig:%+v",
+		len(kv.reconfig), kv.reconfig)
+}
 
-	if err := d.Decode(&kv.lockedGroups); err != nil {
-		panic(fmt.Sprintf("lockedGroups not found: %v", err))
+type road int
+
+const (
+	roadSkip road = iota
+	roadProgress
+	roadReapply
+)
+
+func (kv *ShardKV) earliestUncompletedConfigNum() int {
+	cns := []int{}
+
+	for cn, r := range kv.reconfig {
+		if !r.Completed {
+			cns = append(cns, cn)
+		}
 	}
 
-	log.Printf("load len(lockedGroups):%d lockedGroups:%v",
-		len(kv.lockedGroups), kv.lockedGroups)
+	if len(cns) == 0 {
+		return 0
+	}
+
+	sort.Ints(cns)
+
+	return cns[0]
+}
+
+func (kv *ShardKV) choiceOfTheRoad(
+	log *log.Logger,
+	isLeader bool,
+	oldConfigNum int,
+	newConfigNum int,
+) road {
+	isNewConfig := oldConfigNum < newConfigNum
+
+	someoneWait := false
+	for _, v := range kv.reconfig[oldConfigNum].LockedGroups {
+		if v == transferStatusWaiting {
+			someoneWait = true
+			break
+		}
+	}
+
+	eucn := kv.earliestUncompletedConfigNum()
+	needToRetransfer := eucn != 0 && eucn <= oldConfigNum
+
+	log.Printf("choiceOfTheRoad L:%v RT:%v NC:%v SW:%v OC:%d NC:%d",
+		isLeader, needToRetransfer, isNewConfig, someoneWait,
+		oldConfigNum, newConfigNum)
+
+	log.Printf("choiceOfTheRoad Reconfig:%v", kv.reconfig)
+
+	switch {
+	case !isLeader && !isNewConfig:
+		log.Printf("Skip: nothing new and not a leader")
+		return roadSkip
+	case !isLeader && isNewConfig && someoneWait:
+		log.Printf("Wait transfer from previous configuration CN:%d LS:%v",
+			oldConfigNum, kv.reconfig[oldConfigNum].LockedGroups)
+		return roadSkip
+	case !isLeader && isNewConfig && !someoneWait:
+		log.Printf("New config and everything is done")
+		return roadProgress
+	case isLeader && needToRetransfer:
+		log.Printf("Leader need to re-execture previous transfer")
+		return roadReapply
+	case isLeader && !isNewConfig:
+		log.Printf("Skip: nothing new and not a fresh leader")
+		return roadSkip
+	case isLeader && isNewConfig && someoneWait:
+		log.Printf("Wait transfer from previous configuration CN:%d LS:%v",
+			oldConfigNum, kv.reconfig[oldConfigNum].LockedGroups)
+		return roadSkip
+	case isLeader && isNewConfig && !someoneWait:
+		log.Printf("New config and everything is done")
+		return roadProgress
+	}
+
+	log.Printf("WRN: unexpected combunation L:%v NC:%v SW:%v NR:%v",
+		isLeader, isNewConfig, someoneWait, needToRetransfer)
+
+	return roadSkip
 }
 
 func (kv *ShardKV) refreshConfig() {
 	ticker := time.NewTicker(refreshConfigPeriod)
 	log := raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopic("RFCFG"))
+	onlyTransfer := false
 
 	for range ticker.C {
-		nConfig := kv.scclerk.Query(kv.config.Num + 1)
-		if kv.config.Num >= nConfig.Num {
-			continue
-		}
+		kv.mu.Lock()
+		oConfig := kv.config
+		kv.mu.Unlock()
+
+		nConfig := kv.scclerk.Query(oConfig.Num + 1)
 
 		kv.mu.Lock()
-		if len(kv.lockedShards) != 0 {
-			log.Printf("Wait transfer from previous configuration CN:%d LS:%v",
-				kv.config.Num, kv.lockedShards)
-
+		if oConfig.Num != kv.config.Num {
 			kv.mu.Unlock()
 			continue
 		}
 
-		oConfig := kv.config
-		kv.config = nConfig
+		_, isLeader := kv.rf.GetState()
+		nextStep := kv.choiceOfTheRoad(log, isLeader, oConfig.Num, nConfig.Num)
 
-		log.Printf("New config %d OC:%+v NC:%+v", nConfig.Num, oConfig.Shards, nConfig.Shards)
+		switch nextStep {
+		case roadSkip:
+			kv.mu.Unlock()
+			continue
+		case roadReapply:
+			eucn := kv.earliestUncompletedConfigNum()
+
+			oConfig = kv.scclerk.Query(eucn - 1)
+			nConfig = kv.scclerk.Query(eucn)
+			onlyTransfer = true
+		case roadProgress:
+			kv.config = nConfig
+		}
+
+		log.Printf("Apply config %d OC:%+v NC:%+v OT:%v",
+			nConfig.Num, oConfig.Shards, nConfig.Shards, onlyTransfer)
 
 		// compare old and new config
+		if _, ok := kv.reconfig[nConfig.Num]; !ok {
+			kv.reconfig[nConfig.Num] = Reconfig{
+				LockedShards: make(map[int]int),
+				LockedGroups: make(map[int]TransferStatus),
+			}
+		}
+		lockedShards := kv.reconfig[nConfig.Num].LockedShards
+		lockedGroups := kv.reconfig[nConfig.Num].LockedGroups
 		lostGID := make(map[int]chan []string)
 		lostSID := make(map[int]struct{})
+		alreadyTransfered := map[int]struct{}{}
+		gainedSIDs := []int{}
 		wg := &sync.WaitGroup{}
-		_, isLeader := kv.rf.GetState()
 
 		for sid := 0; sid < shardctrler.NShards; sid++ {
 			switch {
+			// lost Shard need to be transfer
 			case oConfig.Shards[sid] == kv.gid && nConfig.Shards[sid] != kv.gid:
 				if isLeader {
 					lostSID[sid] = struct{}{}
@@ -585,51 +731,73 @@ func (kv *ShardKV) refreshConfig() {
 				}
 			// if take responcebility from someone else-> lock handle that shard
 			// until unlock responce would be given from previous owner
-			case oConfig.Shards[sid] != kv.gid && oConfig.Shards[sid] != 0 &&
-				nConfig.Shards[sid] == kv.gid:
+			case oConfig.Shards[sid] != kv.gid &&
+				nConfig.Shards[sid] == kv.gid && oConfig.Shards[sid] != 0:
 				gid := oConfig.Shards[sid]
 
-				if v, ok := kv.lockedGroups[gid]; ok && v != 0 {
-					switch v {
-					case 1:
-						kv.lockedGroups[oConfig.Shards[sid]] = 2
-					case 2:
-						continue
-					}
-				} else {
-					kv.lockedGroups[gid] = 0
-					kv.lockedShards[sid] = oConfig.Shards[sid]
+				if lockedShards[sid] == -1 {
+					alreadyTransfered[gid] = struct{}{}
 				}
+
+				gainedSIDs = append(gainedSIDs, sid)
 			}
 		}
 
-		for k, v := range kv.lockedGroups {
-			if v == 2 {
-				delete(kv.lockedGroups, k)
+		for _, sid := range gainedSIDs {
+			gid := oConfig.Shards[sid]
+			if v, ok := lockedGroups[gid]; ok && v == transferStatusApplied {
+				lockedShards[sid] = -1
+				continue
 			}
-		}
 
-		kv.mu.Unlock()
+			if _, ok := lockedShards[sid]; ok {
+				continue
+			}
+
+			if _, ok := alreadyTransfered[gid]; ok {
+				lockedShards[sid] = -1
+				lockedGroups[gid] = transferStatusApplied
+				continue
+			}
+
+			lockedShards[sid] = gid
+			lockedGroups[gid] = transferStatusWaiting
+		}
 
 		// lost responcebility -> initiate transfer related K/Vs and dSessions
 		// at the end issue unlock call to the new owner
+		records := []string{} // [key0, value0, key1, value1, ...]
+
 		if isLeader {
 			for key, value := range kv.store {
-				sid := key2shard(key)
-				if _, ok := lostSID[sid]; ok {
-					gid := nConfig.Shards[sid]
-					kvChan := lostGID[gid]
-
-					kvChan <- []string{key, value}
+				if _, ok := lostSID[key2shard(key)]; ok {
+					records = append(records, []string{key, value}...)
 				}
 			}
 		}
 
-		for i := range lostGID {
-			close(lostGID[i])
+		log.Printf("Diff CN:%d L:%v LS:%v LG:%v len(records):%v",
+			nConfig.Num, isLeader, lockedShards, lockedGroups, len(records))
+
+		kv.mu.Unlock()
+
+		if isLeader {
+			for i := 0; i < len(records); i += 2 {
+				gid := nConfig.Shards[key2shard(records[i])]
+				kvChan := lostGID[gid]
+
+				kvChan <- []string{records[i], records[i+1]}
+			}
+
+			for i := range lostGID {
+				close(lostGID[i])
+			}
+
+			wg.Wait()
+			kv.transferCompleted(nConfig.Num)
 		}
 
-		wg.Wait()
+		onlyTransfer = false
 	}
 }
 
@@ -664,20 +832,20 @@ func (kv *ShardKV) transferToShard(
 			srv := kv.make_end(servers[si])
 			var reply TransferReply
 
-			log.Printf("Transfer -> S%d-%d Sh:%d rID:%s CN:%d len(KVs):%d KV:%v",
-				gid, si, shard, requestID, args.ConfigNum, len(args.KeyValues), args.KeyValues)
+			log.Printf("Transfer -> S%d-%d rID:%s CN:%d len(KVs):%d KV:%v",
+				gid, si, requestID, args.ConfigNum, len(args.KeyValues), args.KeyValues)
 
 			ok := srv.Call("ShardKV.Transfer", &args, &reply)
 
-			log.Printf("Transfer <- S%d-%d Sh:%d CN:%d rID:%s len(KVs):%d, Err:%s",
-				gid, si, shard, config.Num, requestID, len(args.KeyValues), reply.Err)
+			log.Printf("Transfer <- S%d-%d OK:%v CN:%d rID:%s Err:%s",
+				gid, si, ok, config.Num, requestID, reply.Err)
 
 			if ok && reply.Err == OK {
 				return
 			}
 
 			if ok && reply.Err == ErrWrongGroup {
-				panic("AAAAA")
+				panic("ErrWrongGroup")
 			}
 
 			if ok && reply.Err == ErrWrongConfigNumber {
@@ -742,8 +910,7 @@ func StartServer(
 	kv.store = make(map[string]string)
 	kv.sessions = make(map[string]Session)
 	kv.dRequest = make(map[int]int64)
-	kv.lockedShards = make(map[int]int)
-	kv.lockedGroups = make(map[int]int)
+	kv.reconfig = make(map[int]Reconfig)
 
 	kv.readSnapshot(persister.ReadSnapshot())
 
