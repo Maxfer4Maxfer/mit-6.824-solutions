@@ -53,9 +53,20 @@ type GetReply struct {
 	Value string
 }
 
+type ChangeConfigArgs struct {
+	CorrelationID raft.CorrelationID
+	RequestID     string
+	ConfigNum     int
+}
+
+type ChangeConfigReply struct {
+	Err Err
+}
+
 type TransferArgs struct {
 	ConfigNum     int
 	KeyValues     map[string]string
+	GID           int
 	CorrelationID raft.CorrelationID
 	RequestID     string
 }

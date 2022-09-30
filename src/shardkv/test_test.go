@@ -34,7 +34,9 @@ func TestStaticShards(t *testing.T) {
 
 	ck := cfg.makeClient()
 
+	fmt.Printf("Test: join 0\n")
 	cfg.join(0)
+	fmt.Printf("Test: join 1\n")
 	cfg.join(1)
 
 	n := 10
@@ -43,15 +45,18 @@ func TestStaticShards(t *testing.T) {
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i) // ensure multiple shards
 		va[i] = randstring(20)
+		fmt.Printf("Test: put %d/%d k:%s v%s\n", i+1, n, ka[i], va[i])
 		ck.Put(ka[i], va[i])
 	}
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d\n", i+1, n)
 		check(t, ck, ka[i], va[i])
 	}
 
 	// make sure that the data really is sharded by
 	// shutting down one shard and checking that some
 	// Get()s don't succeed.
+	fmt.Printf("Test: shutdown group 1\n")
 	cfg.ShutdownGroup(1)
 	cfg.checklogs() // forbid snapshots
 
@@ -59,6 +64,7 @@ func TestStaticShards(t *testing.T) {
 	for xi := 0; xi < n; xi++ {
 		ck1 := cfg.makeClient() // only one call allowed per client
 		go func(i int) {
+			fmt.Printf("Test: get(%v) %d/%d\n", ka[i], i+1, n)
 			v := ck1.Get(ka[i])
 			if v != va[i] {
 				ch <- fmt.Sprintf("Get(%v): expected:\n%v\nreceived:\n%v", ka[i], va[i], v)
@@ -89,8 +95,10 @@ func TestStaticShards(t *testing.T) {
 	}
 
 	// bring the crashed shard/group back to life.
+	fmt.Printf("Test: start group 1\n")
 	cfg.StartGroup(1)
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d\n", i+1, n)
 		check(t, ck, ka[i], va[i])
 	}
 
