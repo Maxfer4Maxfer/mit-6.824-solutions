@@ -4,19 +4,18 @@ Solution for [Lab 4A: The Shard controller](https://pdos.csail.mit.edu/6.824/lab
 
 Tests:
 ```sh
-time python3 mtests.py --workers 4 -n 40 TestStaticShards TestJoinLeave TestSnapshot TestMissChange
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┓
 ┃ Test                     ┃ Failed ┃ Total ┃         Time ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━┩
-│ TestStaticShards         │      0 │     4 │  7.51 ± 0.68 │
-│ TestJoinLeave            │      0 │     4 │  6.67 ± 0.49 │
-│ TestSnapshot             │      0 │     4 │ 15.82 ± 0.91 │
-│ TestMissChange           │      0 │     4 │ 18.60 ± 2.01 │
-│ TestChallenge1Delete     │      0 │     4 │ 22.46 ± 0.62 │
-│ TestChallenge2Unaffected │      0 │     4 │  9.75 ± 0.66 │
-│ TestChallenge2Partial    │      0 │     4 │  6.72 ± 0.39 │
+│ TestStaticShards         │      0 │    40 │  8.05 ± 0.48 │
+│ TestJoinLeave            │      0 │    40 │  7.27 ± 0.52 │
+│ TestSnapshot             │      0 │    40 │ 17.05 ± 1.75 │
+│ TestMissChange           │      0 │    40 │ 21.25 ± 2.47 │
+│ TestChallenge1Delete     │      0 │    40 │ 24.20 ± 0.85 │
+│ TestChallenge2Unaffected │      0 │    40 │  9.68 ± 1.18 │
+│ TestChallenge2Partial    │      0 │    40 │  8.11 ± 0.92 │
 └──────────────────────────┴────────┴───────┴──────────────┘
-304.06s user 41.28s system 378% cpu 1:31.19 total
+3224.32s user 442.94s system 380% cpu 16:03.04 total
 ```
 
 Environment:

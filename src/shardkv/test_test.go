@@ -373,6 +373,7 @@ func TestConcurrent1(t *testing.T) {
 
 	ck := cfg.makeClient()
 
+	fmt.Printf("Test: join 0\n")
 	cfg.join(0)
 
 	n := 10
@@ -381,6 +382,7 @@ func TestConcurrent1(t *testing.T) {
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i) // ensure multiple shards
 		va[i] = randstring(5)
+		fmt.Printf("Test: put %d/%d k:%s v%s\n", i, n, ka[i], va[i])
 		ck.Put(ka[i], va[i])
 	}
 
@@ -392,6 +394,7 @@ func TestConcurrent1(t *testing.T) {
 		ck1 := cfg.makeClient()
 		for atomic.LoadInt32(&done) == 0 {
 			x := randstring(5)
+			fmt.Printf("Test: append i:%d k:%s v%s\n", i, ka[i], x)
 			ck1.Append(ka[i], x)
 			va[i] += x
 			time.Sleep(10 * time.Millisecond)
@@ -403,29 +406,42 @@ func TestConcurrent1(t *testing.T) {
 	}
 
 	time.Sleep(150 * time.Millisecond)
+	fmt.Printf("Test: join 1\n")
 	cfg.join(1)
 	time.Sleep(500 * time.Millisecond)
+	fmt.Printf("Test: join 2\n")
 	cfg.join(2)
 	time.Sleep(500 * time.Millisecond)
+	fmt.Printf("Test: leave 0\n")
 	cfg.leave(0)
 
+	fmt.Printf("Test: shutdown group 0\n")
 	cfg.ShutdownGroup(0)
 	time.Sleep(100 * time.Millisecond)
+	fmt.Printf("Test: shutdown group 1\n")
 	cfg.ShutdownGroup(1)
 	time.Sleep(100 * time.Millisecond)
+	fmt.Printf("Test: shutdown group 2\n")
 	cfg.ShutdownGroup(2)
 
+	fmt.Printf("Test: leave 2\n")
 	cfg.leave(2)
 
 	time.Sleep(100 * time.Millisecond)
+	fmt.Printf("Test: start group 0\n")
 	cfg.StartGroup(0)
+	fmt.Printf("Test: start group 1\n")
 	cfg.StartGroup(1)
+	fmt.Printf("Test: start group 2\n")
 	cfg.StartGroup(2)
 
 	time.Sleep(100 * time.Millisecond)
+	fmt.Printf("Test: join 0\n")
 	cfg.join(0)
+	fmt.Printf("Test: leave 1\n")
 	cfg.leave(1)
 	time.Sleep(500 * time.Millisecond)
+	fmt.Printf("Test: join 1\n")
 	cfg.join(1)
 
 	time.Sleep(1 * time.Second)
@@ -436,6 +452,7 @@ func TestConcurrent1(t *testing.T) {
 	}
 
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d k:%s v:%s\n", i, n-1, ka[i], va[i])
 		check(t, ck, ka[i], va[i])
 	}
 
