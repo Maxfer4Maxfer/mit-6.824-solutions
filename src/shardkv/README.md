@@ -1,19 +1,22 @@
-## MIT 6.824 Distributed Systems: Lab 3 Fault-tolerant Key/Value Service 
+## MIT 6.824 Distributed Systems: Lab 4: Sharded Key/Value Service - Part A: The Shard controller
 
-Solution for [Lab 3: Fault-tolerant Key/Value Service](https://pdos.csail.mit.edu/6.824/labs/lab-kvraft.html)
+Solution for [Lab 4A: The Shard controller](https://pdos.csail.mit.edu/6.824/labs/lab-shard.html)
 
 Tests:
 ```sh
 time python3 mtests.py --workers 4 -n 40 TestStaticShards TestJoinLeave TestSnapshot TestMissChange
-┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┓
-┃ Test             ┃ Failed ┃ Total ┃         Time ┃
-┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━┩
-│ TestStaticShards │      0 │    40 │  6.95 ± 0.35 │
-│ TestJoinLeave    │      0 │    40 │  6.42 ± 0.48 │
-│ TestSnapshot     │      0 │    40 │ 13.61 ± 1.24 │
-│ TestMissChange   │      0 │    40 │ 17.54 ± 4.67 │
-└──────────────────┴────────┴───────┴──────────────┘
-1511.51s user 202.18s system 381% cpu 7:29.12 total
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ Test                     ┃ Failed ┃ Total ┃         Time ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━┩
+│ TestStaticShards         │      0 │     4 │  7.51 ± 0.68 │
+│ TestJoinLeave            │      0 │     4 │  6.67 ± 0.49 │
+│ TestSnapshot             │      0 │     4 │ 15.82 ± 0.91 │
+│ TestMissChange           │      0 │     4 │ 18.60 ± 2.01 │
+│ TestChallenge1Delete     │      0 │     4 │ 22.46 ± 0.62 │
+│ TestChallenge2Unaffected │      0 │     4 │  9.75 ± 0.66 │
+│ TestChallenge2Partial    │      0 │     4 │  6.72 ± 0.39 │
+└──────────────────────────┴────────┴───────┴──────────────┘
+304.06s user 41.28s system 378% cpu 1:31.19 total
 ```
 
 Environment:

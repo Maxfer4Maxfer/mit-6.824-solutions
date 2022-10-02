@@ -503,6 +503,22 @@ func (kv *ShardKV) processOp(op Op) Err {
 		r.Completed = true
 		kv.reconfig[op.ConfigNum] = r
 
+		oConfig := kv.scclerk.Query(op.ConfigNum - 1)
+		nConfig := kv.scclerk.Query(op.ConfigNum)
+		lostSID := make(map[int]struct{})
+
+		for sid := 0; sid < shardctrler.NShards; sid++ {
+			if oConfig.Shards[sid] == kv.gid && nConfig.Shards[sid] != kv.gid {
+				lostSID[sid] = struct{}{}
+			}
+		}
+
+		for key, _ := range kv.store {
+			if _, ok := lostSID[key2shard(key)]; ok {
+				delete(kv.store, key)
+			}
+		}
+
 		kv.log.Printf("Apply TransferCompleted rID:%s CN:%d",
 			op.RequestID, op.ConfigNum)
 	}
