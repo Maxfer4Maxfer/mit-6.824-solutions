@@ -66,6 +66,7 @@ type ChangeConfigReply struct {
 type TransferArgs struct {
 	ConfigNum     int
 	KeyValues     map[string]string
+	DRequests     map[int]int64
 	GID           int
 	CorrelationID raft.CorrelationID
 	RequestID     string

@@ -59,6 +59,7 @@ type Op struct {
 	ConfigNum int
 	GID       int
 	KeyValues map[string]string
+	DRequests map[int]int64
 }
 
 type resultFunc func(Err)
@@ -88,7 +89,7 @@ type ShardKV struct {
 	store map[string]string
 
 	// last done request groupded by cleck IDs
-	dRequest map[int]int64
+	dRequests map[int]int64
 
 	// active sessins waited for responce from applyCh
 	sessions map[string]Session
@@ -179,11 +180,12 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 		args.RequestID, args.ConfigNum, len(args.KeyValues))
 
 	op := Op{
+		Type:      OpTypeTransfer,
 		RequestID: args.RequestID,
 		ConfigNum: args.ConfigNum,
 		KeyValues: args.KeyValues,
 		GID:       args.GID,
-		Type:      OpTypeTransfer,
+		DRequests: args.DRequests,
 	}
 
 	ctx := raft.AddCorrelationID(context.Background(), args.CorrelationID)
@@ -251,7 +253,7 @@ func (kv *ShardKV) callRaft(ctx context.Context, op Op) Err {
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
 
-		lastExecutedSN, ok := kv.dRequest[clerkID(op.RequestID)]
+		lastExecutedSN, ok := kv.dRequests[clerkID(op.RequestID)]
 		if ok && SN(op.RequestID) <= lastExecutedSN {
 			log.Printf("Request %s is old", op.RequestID)
 			resultFunc(OK)
@@ -488,6 +490,15 @@ func (kv *ShardKV) processOp(op Op) Err {
 			}
 		}
 
+		for cID, sn := range op.DRequests {
+			curSN, ok := kv.dRequests[cID]
+			if ok && curSN > sn {
+				continue
+			}
+
+			kv.dRequests[cID] = sn
+		}
+
 		log.Printf("Apply Transfer rID:%s CN:%d len(KVs):%d LS:%v LG:%v",
 			op.RequestID, op.ConfigNum, len(op.KeyValues),
 			lockedShards, lockedGroups)
@@ -558,7 +569,7 @@ func (kv *ShardKV) processApplyCh() {
 			duplicate = true
 		}
 
-		if SN(op.RequestID) <= kv.dRequest[clerkID(op.RequestID)] {
+		if SN(op.RequestID) <= kv.dRequests[clerkID(op.RequestID)] {
 			duplicate = true
 		}
 
@@ -571,8 +582,8 @@ func (kv *ShardKV) processApplyCh() {
 			}
 		}
 
-		if SN(op.RequestID) > kv.dRequest[clerkID(op.RequestID)] {
-			kv.dRequest[clerkID(op.RequestID)] = SN(op.RequestID)
+		if SN(op.RequestID) > kv.dRequests[clerkID(op.RequestID)] {
+			kv.dRequests[clerkID(op.RequestID)] = SN(op.RequestID)
 		}
 
 		s.Done = true
@@ -597,9 +608,9 @@ func (kv *ShardKV) snapshot() []byte {
 	e.Encode(kv.store)
 	log.Printf("save len(store):%d len(snapshot):%d", len(kv.store), w.Len())
 
-	e.Encode(kv.dRequest)
+	e.Encode(kv.dRequests)
 	log.Printf("save len(dRequests):%d  len(snapshot):%d",
-		len(kv.dRequest), w.Len())
+		len(kv.dRequests), w.Len())
 
 	e.Encode(kv.config)
 	log.Printf("save config:%+v  len(snapshot):%d", kv.config, w.Len())
@@ -632,12 +643,12 @@ func (kv *ShardKV) readSnapshot(data []byte) {
 
 	log.Printf("load len(store):%d", len(kv.store))
 
-	if err := d.Decode(&kv.dRequest); err != nil {
+	if err := d.Decode(&kv.dRequests); err != nil {
 		panic(fmt.Sprintf("dRequests not found: %v", err))
 	}
 
 	log.Printf("load len(dRequests):%d dRequests:%v",
-		len(kv.dRequest), kv.dRequest)
+		len(kv.dRequests), kv.dRequests)
 
 	if err := d.Decode(&kv.config); err != nil {
 		panic(fmt.Sprintf("config not found: %v", err))
@@ -865,6 +876,7 @@ func (kv *ShardKV) transferToShard(
 			ConfigNum: config.Num,
 			GID:       kv.gid,
 			KeyValues: kvPairs,
+			DRequests: kv.dRequests,
 		}
 		gid     = config.Shards[shard]
 		servers = config.Groups[gid]
@@ -955,7 +967,7 @@ func StartServer(
 
 	kv.store = make(map[string]string)
 	kv.sessions = make(map[string]Session)
-	kv.dRequest = make(map[int]int64)
+	kv.dRequests = make(map[int]int64)
 	kv.reconfig = make(map[int]Reconfig)
 
 	kv.readSnapshot(persister.ReadSnapshot())
