@@ -637,12 +637,14 @@ func (kv *ShardKV) readSnapshot(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 
+	kv.store = make(map[string]string)
 	if err := d.Decode(&kv.store); err != nil {
 		panic(fmt.Sprintf("store not found: %v", err))
 	}
 
 	log.Printf("load len(store):%d", len(kv.store))
 
+	kv.dRequests = make(map[int]int64)
 	if err := d.Decode(&kv.dRequests); err != nil {
 		panic(fmt.Sprintf("dRequests not found: %v", err))
 	}
