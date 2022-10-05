@@ -72,21 +72,22 @@ type Session struct {
 }
 
 type ShardKV struct {
-	mu           sync.Mutex
-	me           int
-	rf           *raft.Raft
-	applyCh      chan raft.ApplyMsg
-	make_end     func(string) *labrpc.ClientEnd
-	gid          int
-	config       shardctrler.Config
+	mu       sync.Mutex
+	me       int
+	rf       *raft.Raft
+	applyCh  chan raft.ApplyMsg
+	make_end func(string) *labrpc.ClientEnd
+	gid      int
+	// config       shardctrler.Config
+	configNum    int
 	maxraftstate int // snapshot if log grows this big
 	persister    *raft.Persister
-	scclerk      *shardctrler.Clerk
-	// ctrlers      []*labrpc.ClientEnd
 
 	// Your definitions here.
 	log   *log.Logger
 	store map[string]string
+
+	configs *configCache
 
 	// last done request groupded by cleck IDs
 	dRequests map[int]int64
@@ -193,6 +194,10 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 	reply.Err = kv.callRaft(ctx, op)
 }
 
+func (kv *ShardKV) config() shardctrler.Config {
+	return kv.configs.get(kv.configNum)
+}
+
 func (kv *ShardKV) changeConfig(configNum int) {
 	var (
 		correlationID = raft.NewCorrelationID()
@@ -262,16 +267,16 @@ func (kv *ShardKV) callRaft(ctx context.Context, op Op) Err {
 		}
 
 		if op.Type == OpTypePut || op.Type == OpTypeAppend || op.Type == OpTypeGet {
-			if kv.config.Shards[key2shard(op.Key)] != kv.gid {
+			if kv.config().Shards[key2shard(op.Key)] != kv.gid {
 				log.Printf("Wrong shard group RGUID:%d != GID:%d rID:%v",
-					kv.config.Shards[key2shard(op.Key)], kv.gid, op.RequestID)
+					kv.config().Shards[key2shard(op.Key)], kv.gid, op.RequestID)
 
 				resultFunc(ErrWrongGroup)
 
 				return
 			}
 
-			lockedShards := kv.reconfig[kv.config.Num].LockedShards
+			lockedShards := kv.reconfig[kv.configNum].LockedShards
 			if gid, ok := lockedShards[key2shard(op.Key)]; ok && gid != -1 {
 				log.Printf("Waiting transfer from previous group GID:%d", gid)
 
@@ -289,7 +294,7 @@ func (kv *ShardKV) callRaft(ctx context.Context, op Op) Err {
 			return
 		}
 		if !ok {
-			log.Printf("-> rf.Start CN:%d Op:%+v", kv.config.Num, op)
+			log.Printf("-> rf.Start CN:%d Op:%+v", kv.configNum, op)
 
 			idx, term, ok := kv.rf.StartWithCorrelationID(raft.GetCorrelationID(ctx), op)
 
@@ -381,16 +386,18 @@ func (kv *ShardKV) processOp(op Op) Err {
 
 	switch op.Type {
 	case OpTypeGet:
-		if kv.config.Shards[key2shard(op.Key)] != kv.gid {
+		if kv.config().Shards[key2shard(op.Key)] != kv.gid {
 			log.Printf("Get wrong shard group RGUID:%d != GID:%d",
-				kv.config.Shards[key2shard(op.Key)], kv.gid)
+				kv.config().Shards[key2shard(op.Key)], kv.gid)
 
 			return ErrWrongGroup
 		}
+
+		kv.log.Printf("Apply Get rID:%s K:%s", op.RequestID, op.Key)
 	case OpTypePut:
-		if kv.config.Shards[key2shard(op.Key)] != kv.gid {
+		if kv.config().Shards[key2shard(op.Key)] != kv.gid {
 			log.Printf("Put wrong shard group RGUID:%d != GID:%d",
-				kv.config.Shards[key2shard(op.Key)], kv.gid)
+				kv.config().Shards[key2shard(op.Key)], kv.gid)
 
 			return ErrWrongGroup
 		}
@@ -400,9 +407,9 @@ func (kv *ShardKV) processOp(op Op) Err {
 		kv.log.Printf("Apply %s rID:%s K:%s V:%s",
 			OpTypePut, op.RequestID, op.Key, op.Value)
 	case OpTypeAppend:
-		if kv.config.Shards[key2shard(op.Key)] != kv.gid {
+		if kv.config().Shards[key2shard(op.Key)] != kv.gid {
 			log.Printf("Append wrong shard group RGUID:%d != GID:%d",
-				kv.config.Shards[key2shard(op.Key)], kv.gid)
+				kv.config().Shards[key2shard(op.Key)], kv.gid)
 
 			return ErrWrongGroup
 		}
@@ -413,16 +420,16 @@ func (kv *ShardKV) processOp(op Op) Err {
 		log.Printf("Apply %s rID:%s K:%s OV:%s AV:%s",
 			OpTypeAppend, op.RequestID, op.Key, v, op.Value)
 	case OpTypeChangeConfig:
-		if op.ConfigNum <= kv.config.Num {
+		if op.ConfigNum <= kv.configNum {
 			kv.log.Printf("Apply config dublicate rID:%s CN:%d",
 				op.RequestID, op.ConfigNum)
 
 			return OK
 		}
 
-		nConfig := kv.scclerk.Query(op.ConfigNum)
-		oConfig := kv.config
-		kv.config = nConfig
+		nConfig := kv.configs.get(op.ConfigNum)
+		oConfig := kv.config()
+		kv.configNum = nConfig.Num
 
 		if _, ok := kv.reconfig[op.ConfigNum]; !ok {
 			kv.reconfig[nConfig.Num] = Reconfig{
@@ -511,18 +518,31 @@ func (kv *ShardKV) processOp(op Op) Err {
 		}
 
 		r := kv.reconfig[op.ConfigNum]
+
+		if r.Completed {
+			kv.log.Printf("Apply TransferCompleted already applied rID:%s CN:%d",
+				op.RequestID, op.ConfigNum)
+
+			return OK
+		}
+
 		r.Completed = true
 		kv.reconfig[op.ConfigNum] = r
 
-		oConfig := kv.scclerk.Query(op.ConfigNum - 1)
-		nConfig := kv.scclerk.Query(op.ConfigNum)
+		oConfig := kv.configs.get(op.ConfigNum - 1)
+		nConfig := kv.configs.get(op.ConfigNum)
 		lostSID := make(map[int]struct{})
 
 		for sid := 0; sid < shardctrler.NShards; sid++ {
 			if oConfig.Shards[sid] == kv.gid && nConfig.Shards[sid] != kv.gid {
-				lostSID[sid] = struct{}{}
+				if !kv.hasHigherIncome(sid, nConfig.Num) {
+					lostSID[sid] = struct{}{}
+				}
 			}
 		}
+
+		kv.log.Printf("Apply TransferCompleted rID:%s CN:%d lostSID:%v",
+			op.RequestID, op.ConfigNum, lostSID)
 
 		for key, _ := range kv.store {
 			if _, ok := lostSID[key2shard(key)]; ok {
@@ -566,10 +586,15 @@ func (kv *ShardKV) processApplyCh() {
 
 		s, ok := kv.sessions[op.RequestID]
 		if ok && s.Done {
+			kv.log.Printf("Duplicate rID:%s, S:%+v", op.RequestID, s)
+
 			duplicate = true
 		}
 
 		if SN(op.RequestID) <= kv.dRequests[clerkID(op.RequestID)] {
+			kv.log.Printf("Duplicate rID:%s, SN(op):%d <= dRequest:%d",
+				op.RequestID, SN(op.RequestID), kv.dRequests[clerkID(op.RequestID)])
+
 			duplicate = true
 		}
 
@@ -612,8 +637,8 @@ func (kv *ShardKV) snapshot() []byte {
 	log.Printf("save len(dRequests):%d  len(snapshot):%d",
 		len(kv.dRequests), w.Len())
 
-	e.Encode(kv.config)
-	log.Printf("save config:%+v  len(snapshot):%d", kv.config, w.Len())
+	e.Encode(kv.configNum)
+	log.Printf("save configNum:%+v  len(snapshot):%d", kv.configNum, w.Len())
 
 	e.Encode(kv.reconfig)
 	log.Printf("save len(reconfig):%d  len(snapshot):%d",
@@ -652,11 +677,11 @@ func (kv *ShardKV) readSnapshot(data []byte) {
 	log.Printf("load len(dRequests):%d dRequests:%v",
 		len(kv.dRequests), kv.dRequests)
 
-	if err := d.Decode(&kv.config); err != nil {
-		panic(fmt.Sprintf("config not found: %v", err))
+	if err := d.Decode(&kv.configNum); err != nil {
+		panic(fmt.Sprintf("configNum not found: %v", err))
 	}
 
-	log.Printf("load config:%+v", kv.config)
+	log.Printf("load configNum:%+v", kv.configNum)
 
 	if err := d.Decode(&kv.reconfig); err != nil {
 		panic(fmt.Sprintf("reconfig not found: %v", err))
@@ -673,11 +698,33 @@ const (
 	roadProgress
 )
 
+func (kv *ShardKV) hasHigherIncome(sid int, configNum int) bool {
+	for cn, r := range kv.reconfig {
+		if cn <= configNum {
+			continue
+		}
+
+		if r.LockedShards[sid] == -1 {
+			return true
+		}
+
+		prevCfg := kv.configs.get(cn - 1)
+
+		gid := prevCfg.Shards[sid]
+
+		if s, ok := r.LockedGroups[gid]; ok && s == transferStatusApplied {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (kv *ShardKV) earliestUncompletedConfigNum() int {
 	cns := []int{}
 
 	for cn, r := range kv.reconfig {
-		if !r.Completed && cn <= kv.config.Num {
+		if !r.Completed && cn <= kv.configNum {
 			cns = append(cns, cn)
 		}
 	}
@@ -750,8 +797,8 @@ func (kv *ShardKV) transferReconfig() {
 			continue
 		}
 
-		oConfig := kv.scclerk.Query(eucn - 1)
-		nConfig := kv.scclerk.Query(eucn)
+		oConfig := kv.configs.get(eucn - 1)
+		nConfig := kv.configs.get(eucn)
 
 		log.Printf("Transfer config %d OC:%+v NC:%+v",
 			nConfig.Num, oConfig.Shards, nConfig.Shards)
@@ -769,6 +816,11 @@ func (kv *ShardKV) transferReconfig() {
 		lostGID := make(map[int]chan []string)
 		lostSID := make(map[int]struct{})
 		wg := &sync.WaitGroup{}
+		dRequests := make(map[int]int64, len(kv.dRequests))
+
+		for k, v := range kv.dRequests {
+			dRequests[k] = v
+		}
 
 		for sid := 0; sid < shardctrler.NShards; sid++ {
 			switch {
@@ -782,7 +834,7 @@ func (kv *ShardKV) transferReconfig() {
 				kvChan := make(chan []string)
 				lostGID[gid] = kvChan
 				wg.Add(1)
-				go kv.transferToShard(wg, kvChan, nConfig, sid)
+				go kv.transferToShard(wg, kvChan, nConfig, sid, dRequests)
 			}
 		}
 
@@ -816,7 +868,6 @@ func (kv *ShardKV) transferReconfig() {
 		kv.transferCompleted(nConfig.Num)
 	}
 }
-
 func (kv *ShardKV) refreshConfig() {
 	ticker := time.NewTicker(refreshConfigPeriod)
 	log := raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopic("RFCFG"))
@@ -829,10 +880,10 @@ func (kv *ShardKV) refreshConfig() {
 			continue
 		}
 
-		oConfig := kv.config
+		oConfig := kv.config()
 		kv.mu.Unlock()
 
-		nConfig := kv.scclerk.Query(oConfig.Num + 1)
+		nConfig := kv.configs.get(oConfig.Num + 1)
 
 		kv.mu.Lock()
 		_, isLeader = kv.rf.GetState()
@@ -849,8 +900,6 @@ func (kv *ShardKV) refreshConfig() {
 		case roadSkip:
 			continue
 		case roadProgress:
-			// kv.config = nConfig
-
 			log.Printf("Change config %d OC:%+v NC:%+v",
 				nConfig.Num, oConfig.Shards, nConfig.Shards)
 
@@ -861,7 +910,7 @@ func (kv *ShardKV) refreshConfig() {
 
 func (kv *ShardKV) transferToShard(
 	wg *sync.WaitGroup, kvChan chan []string,
-	config shardctrler.Config, shard int,
+	config shardctrler.Config, shard int, dRequests map[int]int64,
 ) {
 	defer wg.Done()
 
@@ -878,7 +927,7 @@ func (kv *ShardKV) transferToShard(
 			ConfigNum: config.Num,
 			GID:       kv.gid,
 			KeyValues: kvPairs,
-			DRequests: kv.dRequests,
+			DRequests: dRequests,
 		}
 		gid     = config.Shards[shard]
 		servers = config.Groups[gid]
@@ -953,19 +1002,18 @@ func StartServer(
 	kv.persister = persister
 	kv.make_end = make_end
 	kv.gid = gid
-	// kv.ctrlers = ctrlers
 
 	// Your initialization code here.
 
 	// Use something like this to talk to the shardctrler:
-	kv.scclerk = shardctrler.MakeClerk(ctrlers)
-
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	kv.log = log.New(
 		os.Stdout, fmt.Sprintf("S%d-%d ", gid, me), log.Lshortfile|log.Lmicroseconds)
 	kv.log = raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopicService)
+
+	kv.configs = newConfigCache(kv.log, ctrlers)
 
 	kv.store = make(map[string]string)
 	kv.sessions = make(map[string]Session)

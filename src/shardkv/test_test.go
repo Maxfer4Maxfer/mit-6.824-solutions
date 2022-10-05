@@ -382,7 +382,7 @@ func TestConcurrent1(t *testing.T) {
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i) // ensure multiple shards
 		va[i] = randstring(5)
-		fmt.Printf("Test: put %d/%d k:%s v%s\n", i, n, ka[i], va[i])
+		fmt.Printf("Test: put %d/%d k:%s v:%s\n", i, n, ka[i], va[i])
 		ck.Put(ka[i], va[i])
 	}
 
@@ -394,7 +394,7 @@ func TestConcurrent1(t *testing.T) {
 		ck1 := cfg.makeClient()
 		for atomic.LoadInt32(&done) == 0 {
 			x := randstring(5)
-			fmt.Printf("Test: append i:%d k:%s v%s\n", i, ka[i], x)
+			fmt.Printf("Test: append i:%d k:%s v:%s\n", i, ka[i], x)
 			ck1.Append(ka[i], x)
 			va[i] += x
 			time.Sleep(10 * time.Millisecond)
@@ -471,8 +471,11 @@ func TestConcurrent2(t *testing.T) {
 
 	ck := cfg.makeClient()
 
+	fmt.Printf("Test: join 1\n")
 	cfg.join(1)
+	fmt.Printf("Test: join 0\n")
 	cfg.join(0)
+	fmt.Printf("Test: join 2\n")
 	cfg.join(2)
 
 	n := 10
@@ -481,6 +484,7 @@ func TestConcurrent2(t *testing.T) {
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i) // ensure multiple shards
 		va[i] = randstring(1)
+		fmt.Printf("Test: put %d/%d k:%s v:%s\n", i, n-1, ka[i], va[i])
 		ck.Put(ka[i], va[i])
 	}
 
@@ -491,6 +495,7 @@ func TestConcurrent2(t *testing.T) {
 		defer func() { ch <- true }()
 		for atomic.LoadInt32(&done) == 0 {
 			x := randstring(1)
+			fmt.Printf("Test: append i:%d k:%s v:%s\n", i, ka[i], x)
 			ck1.Append(ka[i], x)
 			va[i] += x
 			time.Sleep(50 * time.Millisecond)
@@ -502,22 +507,34 @@ func TestConcurrent2(t *testing.T) {
 		go ff(i, ck1)
 	}
 
+	fmt.Printf("Test: leave 0\n")
 	cfg.leave(0)
+	fmt.Printf("Test: leave 2\n")
 	cfg.leave(2)
 	time.Sleep(3000 * time.Millisecond)
+	fmt.Printf("Test: join 0\n")
 	cfg.join(0)
+	fmt.Printf("Test: join 2\n")
 	cfg.join(2)
+	fmt.Printf("Test: leave 1\n")
 	cfg.leave(1)
 	time.Sleep(3000 * time.Millisecond)
+	fmt.Printf("Test: join 1\n")
 	cfg.join(1)
+	fmt.Printf("Test: leave 0\n")
 	cfg.leave(0)
+	fmt.Printf("Test: leave 2\n")
 	cfg.leave(2)
 	time.Sleep(3000 * time.Millisecond)
 
+	fmt.Printf("Test: shutdown group 1\n")
 	cfg.ShutdownGroup(1)
+	fmt.Printf("Test: shutdown group 2\n")
 	cfg.ShutdownGroup(2)
 	time.Sleep(1000 * time.Millisecond)
+	fmt.Printf("Test: start group 1\n")
 	cfg.StartGroup(1)
+	fmt.Printf("Test: start group 2\n")
 	cfg.StartGroup(2)
 
 	time.Sleep(2 * time.Second)
@@ -528,6 +545,7 @@ func TestConcurrent2(t *testing.T) {
 	}
 
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d k:%s v:%s\n", i, n-1, ka[i], va[i])
 		check(t, ck, ka[i], va[i])
 	}
 
@@ -542,6 +560,7 @@ func TestConcurrent3(t *testing.T) {
 
 	ck := cfg.makeClient()
 
+	fmt.Printf("Test: join 0\n")
 	cfg.join(0)
 
 	n := 10
@@ -550,6 +569,7 @@ func TestConcurrent3(t *testing.T) {
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i)
 		va[i] = randstring(1)
+		fmt.Printf("Test: put %d/%d k:%s v:%s\n", i, n-1, ka[i], va[i])
 		ck.Put(ka[i], va[i])
 	}
 
@@ -560,6 +580,7 @@ func TestConcurrent3(t *testing.T) {
 		defer func() { ch <- true }()
 		for atomic.LoadInt32(&done) == 0 {
 			x := randstring(1)
+			fmt.Printf("Test: append i:%d k:%s v:%s\n", i, ka[i], x)
 			ck1.Append(ka[i], x)
 			va[i] += x
 		}
@@ -572,18 +593,28 @@ func TestConcurrent3(t *testing.T) {
 
 	t0 := time.Now()
 	for time.Since(t0) < 12*time.Second {
+		fmt.Printf("Test: join 2\n")
 		cfg.join(2)
+		fmt.Printf("Test: join 1\n")
 		cfg.join(1)
 		time.Sleep(time.Duration(rand.Int()%900) * time.Millisecond)
+		fmt.Printf("Test: shutdown group 0\n")
 		cfg.ShutdownGroup(0)
+		fmt.Printf("Test: shutdown group 1\n")
 		cfg.ShutdownGroup(1)
+		fmt.Printf("Test: shutdown group 2\n")
 		cfg.ShutdownGroup(2)
+		fmt.Printf("Test: start group 0\n")
 		cfg.StartGroup(0)
+		fmt.Printf("Test: start group 1\n")
 		cfg.StartGroup(1)
+		fmt.Printf("Test: start group 2\n")
 		cfg.StartGroup(2)
 
 		time.Sleep(time.Duration(rand.Int()%900) * time.Millisecond)
+		fmt.Printf("Test: leave 1\n")
 		cfg.leave(1)
+		fmt.Printf("Test: leave 2\n")
 		cfg.leave(2)
 		time.Sleep(time.Duration(rand.Int()%900) * time.Millisecond)
 	}
@@ -596,6 +627,7 @@ func TestConcurrent3(t *testing.T) {
 	}
 
 	for i := 0; i < n; i++ {
+		fmt.Printf("Test: check %d/%d k:%s v:%s\n", i, n-1, ka[i], va[i])
 		check(t, ck, ka[i], va[i])
 	}
 
@@ -878,6 +910,8 @@ func TestChallenge1Delete(t *testing.T) {
 			raft := cfg.groups[gi].saved[i].RaftStateSize()
 			snap := len(cfg.groups[gi].saved[i].ReadSnapshot())
 			total += raft + snap
+			fmt.Printf("Test: G:%d-%d raft:%d snap:%d total:%d\n",
+				gi, i, raft, snap, total)
 		}
 	}
 
