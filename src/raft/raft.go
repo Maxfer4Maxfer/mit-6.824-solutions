@@ -179,6 +179,11 @@ func (rf *Raft) applyLogProcessing() {
 			for idx := lastProcessed + 1; idx <= rf.commitIndex(); idx++ {
 				rf.mu.Lock()
 				if idx <= rf.log.lastIncludedIndex {
+					log.Printf("Skip I:%d LII:%d", idx, rf.log.lastIncludedIndex)
+
+					lastProcessed = rf.log.lastIncludedIndex
+					idx = lastProcessed
+
 					rf.mu.Unlock()
 
 					continue
@@ -257,10 +262,13 @@ func (rf *Raft) persistWithSnapshot(ctx context.Context, snapshot []byte) {
 
 	state := w.Bytes()
 
-	log.Printf("save CT:%d VF:%d LII:%d LIT:%d OF:%d len(log):%d len(state):%d",
+	log.Printf("save CT:%d VF:%d LII:%d LIT:%d OF:%d len(log):%d",
 		rf.currentTerm, rf.votedFor,
 		rf.log.lastIncludedIndex, rf.log.lastIncludedTerm,
-		rf.log.offset, len(rf.log.log), len(state))
+		rf.log.offset, len(rf.log.log))
+
+	log.Printf("save len(state):%d len(snapshot):%d len(state+snapshot):%d",
+		len(state), len(snapshot), len(state)+len(snapshot))
 
 	if len(snapshot) == 0 {
 		rf.persister.SaveRaftState(state)
