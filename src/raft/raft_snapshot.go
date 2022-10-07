@@ -72,9 +72,9 @@ func (rf *Raft) syncSnapshot(ctx context.Context, peerID int) {
 		}
 		rf.mu.Unlock()
 
-		log.Printf("-> S%d {T:%d LII:%d LIT:%d OF:%d len(data):%d Done:%v}",
-			peerID, args.Term, args.LastIncludedIndex, args.LastIncludedTerm,
-			args.Offset, len(args.Data), args.Done)
+		log.Printf("-> %s {T:%d LII:%d LIT:%d OF:%d len(data):%d Done:%v}",
+			rf.peerName(peerID), args.Term, args.LastIncludedIndex,
+			args.LastIncludedTerm, args.Offset, len(args.Data), args.Done)
 
 		if ok := rf.sendInstallSnapshot(peerID, args, reply); !ok {
 			log.Printf("WRN fail InstallSnapshot call to %d peer", peerID)
@@ -82,14 +82,14 @@ func (rf *Raft) syncSnapshot(ctx context.Context, peerID int) {
 			continue
 		}
 
-		log.Printf("<- S%d {T:%d}", peerID, reply.Term)
+		log.Printf("<- %s {T:%d}", rf.peerName(peerID), reply.Term)
 
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
 
 		if reply.Term > rf.currentTerm {
-			log.Printf("S%d has a higher term %d > %d",
-				peerID, reply.Term, rf.currentTerm)
+			log.Printf("%s has a higher term %d > %d",
+				rf.peerName(peerID), reply.Term, rf.currentTerm)
 
 			if rf.heartbeats.IsSendingInProgress() {
 				rf.heartbeats.StopSending()
@@ -120,9 +120,9 @@ func (rf *Raft) InstallSnapshot(
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	log.Printf("<- S%d {T:%d LII:%d LIT:%d OF:%d len(data):%d Done:%v}",
-		args.LeaderID, args.Term, args.LastIncludedIndex, args.LastIncludedTerm,
-		args.Offset, len(args.Data), args.Done)
+	log.Printf("<- %s {T:%d LII:%d LIT:%d OF:%d len(data):%d Done:%v}",
+		rf.peerName(args.LeaderID), args.Term, args.LastIncludedIndex,
+		args.LastIncludedTerm, args.Offset, len(args.Data), args.Done)
 
 	// 1. Reply immediately if term < currentTerm
 	if args.Term < rf.currentTerm {

@@ -2,6 +2,7 @@ package raft
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 )
@@ -28,9 +29,20 @@ func extendLoggerWithPrefix(l *log.Logger, pr string, d string) *log.Logger {
 	currentPrefix := l.Prefix()
 	currentPrefix = strings.TrimSpace(currentPrefix)
 
-	out := log.New(l.Writer(), currentPrefix, l.Flags())
+	newPrefix := currentPrefix + d + pr + " "
 
-	out.SetPrefix(currentPrefix + d + pr + " ")
+	out := log.New(l.Writer(), newPrefix, l.Flags())
+
+	return out
+}
+
+func changeRaftName(l *log.Logger, name string) *log.Logger {
+	currentPrefix := l.Prefix()
+	ps := strings.Split(currentPrefix, " ")
+
+	ps[0] = fmt.Sprintf("R%s", name)
+
+	out := log.New(l.Writer(), strings.Join(ps, " "), l.Flags())
 
 	return out
 }

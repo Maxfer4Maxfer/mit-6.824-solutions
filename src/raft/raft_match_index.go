@@ -9,8 +9,8 @@ func (rf *Raft) updateMatchIndex(ctx context.Context, peerID int, index int) {
 	if rf.matchIndex[peerID] < index {
 		log := ExtendLogger(ctx, rf.logger, LoggerTopicMatchIndex)
 
-		log.Printf("Update matchIndex for S%d %d -> %d",
-			peerID, rf.matchIndex[peerID], index)
+		log.Printf("Update matchIndex for %s %d -> %d",
+			rf.peerName(peerID), rf.matchIndex[peerID], index)
 
 		rf.matchIndex[peerID] = index
 		rf.matchIndexCond.Broadcast()

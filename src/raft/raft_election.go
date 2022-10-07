@@ -107,27 +107,28 @@ func (rf *Raft) leaderElectionSendRequestVote(
 
 	defer wg.Done()
 
-	log.Printf("-> S%d T:%d", peerID, args.Term)
+	log.Printf("-> %s T:%d", rf.peerName(peerID), args.Term)
 
 	if ok := rf.sendRequestVote(peerID, args, reply); !ok {
-		log.Printf("Fail RequestVote call to S%d peer T:%d", peerID, args.Term)
+		log.Printf("Fail RequestVote call to %s peer T:%d",
+			rf.peerName(peerID), args.Term)
 
 		return
 	}
 
-	log.Printf("<- S%d ET:%d {T:%d VG:%v}",
-		peerID, args.Term, reply.Term, reply.VoteGranted)
+	log.Printf("<- %s ET:%d {T:%d VG:%v}",
+		rf.peerName(peerID), args.Term, reply.Term, reply.VoteGranted)
 
 	rf.mu.Lock()
 	ok := rf.processIncomingTerm(ctx, log, peerID, reply.Term)
 	rf.mu.Unlock()
 
 	if ok && reply.VoteGranted {
-		log.Printf("Win: S%d voted for us", peerID)
+		log.Printf("Win: %s voted for us", rf.peerName(peerID))
 
 		resultCh <- 1
 	} else {
-		log.Printf("Loose: S%d voted against us", peerID)
+		log.Printf("Loose: %s voted against us", rf.peerName(peerID))
 
 		resultCh <- 0
 	}
@@ -194,12 +195,12 @@ func (rf *Raft) leaderElectionVotesCalculation(
 			if nVotedFor > len(rf.peers)/2 {
 				log.Printf("New leader T:%d", rf.currentTerm)
 
-				for i := range rf.peers {
-					log.Printf("Set nextIndex for S%d to %d",
-						i, rf.log.LastIndex()+1)
+				for peerID := range rf.peers {
+					log.Printf("Set nextIndex for %s to %d",
+						rf.peerName(peerID), rf.log.LastIndex()+1)
 
-					rf.nextIndex[i] = rf.log.LastIndex() + 1
-					rf.matchIndex[i] = 0
+					rf.nextIndex[peerID] = rf.log.LastIndex() + 1
+					rf.matchIndex[peerID] = 0
 				}
 
 				rf.heartbeats.StartSending()
@@ -256,8 +257,8 @@ func (rf *Raft) RequestVote(
 	ctx := AddCorrelationID(context.Background(), args.CorrelationID)
 	log := ExtendLogger(ctx, rf.logger, LoggerTopicLeaderElection)
 
-	log.Printf("<- S%d {T:%d, LLI:%d, LLT:%d}",
-		args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm)
+	log.Printf("<- %s {T:%d, LLI:%d, LLT:%d}", rf.peerName(args.CandidateID),
+		args.Term, args.LastLogIndex, args.LastLogTerm)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()

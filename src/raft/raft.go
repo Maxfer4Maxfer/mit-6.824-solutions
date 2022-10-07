@@ -90,6 +90,9 @@ type Raft struct {
 	// Raft log
 	log *RLog
 
+	// group name to which raft belong to
+	gname string
+
 	// index of highest log entry known to be committed
 	// initialized to 0, intcreases monotonically
 	// available only via getter and setter methods
@@ -358,7 +361,8 @@ func (rf *Raft) processIncomingTerm(
 	ctx context.Context, log *log.Logger, peerID int, term int,
 ) bool {
 	if term > rf.currentTerm {
-		log.Printf("S%d has a higher term %d > %d", peerID, term, rf.currentTerm)
+		log.Printf("%s has a higher term %d > %d",
+			rf.peerName(peerID), term, rf.currentTerm)
 
 		if rf.heartbeats.IsSendingInProgress() {
 			rf.heartbeats.StopSending()
@@ -378,6 +382,15 @@ func (rf *Raft) processIncomingTerm(
 	return true
 }
 
+func (rf *Raft) SetGroupName(gname string) {
+	rf.logger = changeRaftName(rf.logger, fmt.Sprintf("%s-%d", gname, rf.me))
+	rf.gname = gname
+}
+
+func (rf *Raft) peerName(peerID int) string {
+	return fmt.Sprintf("R%s-%d", rf.gname, peerID)
+}
+
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
@@ -388,7 +401,8 @@ func (rf *Raft) processIncomingTerm(
 // Make() must return quickly, so it should start goroutines
 // for any long-running work.
 func Make(
-	peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg,
+	peers []*labrpc.ClientEnd, me int, persister *Persister, 
+	applyCh chan ApplyMsg, opts ...func(*Raft),
 ) *Raft {
 	rand.Seed(MakeSeed())
 
@@ -413,6 +427,10 @@ func Make(
 		fmt.Sprintf("R%d ", me),
 		log.Lshortfile|log.Lmicroseconds,
 	)
+
+	for i := range opts {
+		opts[i](rf)
+	}
 
 	rf.heartbeats = initHeartbeatsEngine(
 		rf.logger, broadcastTime, rf.sendHeartbeats,

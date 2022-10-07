@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -1007,7 +1008,11 @@ func StartServer(
 
 	// Use something like this to talk to the shardctrler:
 	kv.applyCh = make(chan raft.ApplyMsg)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	kv.rf = raft.Make(
+		servers, me, persister, kv.applyCh,
+		[]func(rf *raft.Raft){func(rf *raft.Raft) {
+			rf.SetGroupName(strconv.Itoa(gid))
+		}}...)
 
 	kv.log = log.New(
 		os.Stdout, fmt.Sprintf("S%d-%d ", gid, me), log.Lshortfile|log.Lmicroseconds)

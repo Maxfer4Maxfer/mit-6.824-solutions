@@ -14,8 +14,8 @@ func (rf *Raft) AppendEntries(
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	log.Printf("<- S%d {T:%d PLI:%d PLT:%d LC:%d len(Entries):%d}",
-		args.LeaderID, args.Term, args.PrevLogIndex, args.PrevLogTerm,
+	log.Printf("<- %s {T:%d PLI:%d PLT:%d LC:%d len(Entries):%d}",
+		rf.peerName(args.LeaderID), args.Term, args.PrevLogIndex, args.PrevLogTerm,
 		args.LeaderCommit, len(args.Entries))
 
 	log.Printf("Current state: {T:%d LC:%d LI:%d LII:%d len(log):%d}",
@@ -184,8 +184,8 @@ func (rf *Raft) syncProcessReply(
 	reply *AppendEntriesReply,
 	index int,
 ) syncProcessReplyReturn {
-	log.Printf("<- S%d {T:%d S:%v CI:%d CT:%d}",
-		peerID, reply.Term, reply.Success, reply.ConflictIndex, reply.ConflictTerm)
+	log.Printf("<- %s {T:%d S:%v CI:%d CT:%d}", rf.peerName(peerID),
+		reply.Term, reply.Success, reply.ConflictIndex, reply.ConflictTerm)
 
 	rf.mu.Lock()
 
@@ -197,8 +197,8 @@ func (rf *Raft) syncProcessReply(
 
 		return syncProcessReplyReturnFailed
 	case reply.Term > rf.currentTerm:
-		log.Printf("S%d has a higher term %d > %d",
-			peerID, reply.Term, rf.currentTerm)
+		log.Printf("%s has a higher term %d > %d",
+			rf.peerName(peerID), reply.Term, rf.currentTerm)
 
 		if rf.heartbeats.IsSendingInProgress() {
 			rf.heartbeats.StopSending()
@@ -308,7 +308,7 @@ func (rf *Raft) sync(
 		}
 
 		if rf.nextIndex[peerID] > index+1 {
-			log.Printf("S%d already updated by someone else", peerID)
+			log.Printf("%s already updated by someone else", rf.peerName(peerID))
 			rf.mu.Unlock()
 
 			return true
@@ -327,8 +327,8 @@ func (rf *Raft) sync(
 
 		rf.mu.Unlock()
 
-		log.Printf("-> S%d {T:%d PLI:%d PLT:%d LC:%d len(Entries):%d}",
-			peerID, args.Term, args.PrevLogIndex, args.PrevLogTerm,
+		log.Printf("-> %s {T:%d PLI:%d PLT:%d LC:%d len(Entries):%d}",
+			rf.peerName(peerID), args.Term, args.PrevLogIndex, args.PrevLogTerm,
 			args.LeaderCommit, len(args.Entries))
 
 		if ok := rf.sendAppendEntries(peerID, args, reply); !ok {
