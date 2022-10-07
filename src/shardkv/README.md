@@ -4,18 +4,24 @@ Solution for [Lab 4A: The Shard controller](https://pdos.csail.mit.edu/6.824/lab
 
 Tests:
 ```sh
+❯ time python3 mtests.py --workers 4 -n 40 TestStaticShards TestJoinLeave TestSnapshot TestMissChange TestConcurrent1 TestConcurrent2 TestUnreliable1 TestUnreliable2 TestUnreliable3  TestChallenge1Delete TestChallenge2Unaffected TestChallenge2Partial
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┓
 ┃ Test                     ┃ Failed ┃ Total ┃         Time ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━┩
-│ TestStaticShards         │      0 │    40 │  8.05 ± 0.48 │
-│ TestJoinLeave            │      0 │    40 │  7.27 ± 0.52 │
-│ TestSnapshot             │      0 │    40 │ 17.05 ± 1.75 │
-│ TestMissChange           │      0 │    40 │ 21.25 ± 2.47 │
-│ TestChallenge1Delete     │      0 │    40 │ 24.20 ± 0.85 │
-│ TestChallenge2Unaffected │      0 │    40 │  9.68 ± 1.18 │
-│ TestChallenge2Partial    │      0 │    40 │  8.11 ± 0.92 │
+│ TestStaticShards         │      0 │    40 │  8.34 ± 0.78 │
+│ TestJoinLeave            │      0 │    40 │  7.94 ± 0.80 │
+│ TestSnapshot             │      0 │    40 │ 19.96 ± 1.56 │
+│ TestMissChange           │      0 │    40 │ 22.40 ± 2.74 │
+│ TestConcurrent1          │      0 │    40 │ 13.65 ± 6.36 │
+│ TestConcurrent2          │      0 │    40 │ 25.19 ± 2.69 │
+│ TestUnreliable1          │      0 │    40 │ 23.63 ± 5.58 │
+│ TestUnreliable2          │      0 │    40 │ 12.87 ± 1.58 │
+│ TestUnreliable3          │      0 │    40 │ 12.66 ± 2.68 │
+│ TestChallenge1Delete     │      0 │    40 │ 28.10 ± 2.42 │
+│ TestChallenge2Unaffected │      0 │    40 │ 11.85 ± 2.00 │
+│ TestChallenge2Partial    │      0 │    40 │  9.35 ± 1.53 │
 └──────────────────────────┴────────┴───────┴──────────────┘
-3224.32s user 442.94s system 380% cpu 16:03.04 total
+6754.79s user 756.02s system 381% cpu 32:50.44 total
 ```
 
 Environment:
