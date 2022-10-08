@@ -213,24 +213,21 @@ func (sc *ShardCtrler) callRaft(ctx context.Context, op Op) Err {
 			return
 		}
 
+		log.Printf("-> rf.Start Op:%+v", op)
+
+		idx, term, ok := sc.rf.StartWithCorrelationID(raft.GetCorrelationID(ctx), op)
+
+		log.Printf("<- rf.Start rID:%s I:%d T:%d S:%v",
+			op.RequestID, idx, term, ok)
+
 		if !ok {
-			log.Printf("-> rf.Start Op:%+v", op)
+			resultFunc(ErrWrongLeader)
 
-			idx, term, ok := sc.rf.StartWithCorrelationID(raft.GetCorrelationID(ctx), op)
-
-			log.Printf("<- rf.Start rID:%s I:%d T:%d S:%v",
-				op.RequestID, idx, term, ok)
-
-			if !ok {
-				resultFunc(ErrWrongLeader)
-
-				return
-			}
-
-			s.Term = term
-			s.Index = idx
+			return
 		}
 
+		s.Term = term
+		s.Index = idx
 		s.Subscribers = append(s.Subscribers, resultFunc)
 		sc.sessions[op.RequestID] = s
 	}()
