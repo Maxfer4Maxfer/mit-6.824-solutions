@@ -107,6 +107,10 @@ func (rf *Raft) leaderElectionSendRequestVote(
 
 	defer wg.Done()
 
+	if !isLeaderElectionActive(ctx) {
+		return
+	}
+
 	log.Printf("-> %s T:%d", rf.peerName(peerID), args.Term)
 
 	if ok := rf.sendRequestVote(peerID, args, reply); !ok {
@@ -118,6 +122,10 @@ func (rf *Raft) leaderElectionSendRequestVote(
 
 	log.Printf("<- %s ET:%d {T:%d VG:%v}",
 		rf.peerName(peerID), args.Term, reply.Term, reply.VoteGranted)
+
+	if !isLeaderElectionActive(ctx) {
+		return
+	}
 
 	rf.mu.Lock()
 	ok := rf.processIncomingTerm(ctx, log, peerID, reply.Term)
@@ -244,9 +252,9 @@ func (rf *Raft) leaderElectionStart(ctx context.Context) {
 		LastLogTerm:   rf.log.Term(rf.log.LastIndex()),
 	}
 
-	rf.mu.Unlock()
-
 	resultCh := rf.leaderElectionSendRequestVotes(ctx, args.DeepCopy())
+
+	rf.mu.Unlock()
 
 	rf.leaderElectionVotesCalculation(ctx, args.Term, resultCh)
 }
