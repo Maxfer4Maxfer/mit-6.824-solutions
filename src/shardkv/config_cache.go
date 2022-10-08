@@ -57,7 +57,7 @@ func (cc *configCache) set(cfg shardctrler.Config) {
 func (cc *configCache) refresh() {
 	ticker := time.NewTicker(refreshConfigPeriod)
 
-	for range ticker.C {
+	for ; true; <-ticker.C {
 		cc.mu.RLock()
 		if _, ok := cc.configs[cc.nextNum]; ok {
 			cc.nextNum++
