@@ -155,7 +155,7 @@ func TestJoinLeave(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	cfg.checklogs()
-	fmt.Printf("Test: shotdown 0\n")
+	fmt.Printf("Test: shutdown group 0\n")
 	cfg.ShutdownGroup(0)
 
 	for i := 0; i < n; i++ {
@@ -580,8 +580,10 @@ func TestConcurrent3(t *testing.T) {
 		defer func() { ch <- true }()
 		for atomic.LoadInt32(&done) == 0 {
 			x := randstring(1)
-			fmt.Printf("Test: append i:%d k:%s v:%s\n", i, ka[i], x)
+			t := time.Now()
+			fmt.Printf("Test: %v before append i:%d k:%s v:%s\n", t, i, ka[i], x)
 			ck1.Append(ka[i], x)
+			fmt.Printf("Test: %v after append i:%d k:%s v:%s\n", time.Since(t), i, ka[i], x)
 			va[i] += x
 		}
 	}
