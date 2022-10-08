@@ -14,7 +14,7 @@ import (
 	"6.824/raft"
 )
 
-const cleanupStaleSessionCheckPeriod = 500 * time.Microsecond
+const cleanupStaleSessionCheckPeriod = 500 * time.Millisecond
 
 type ShardCtrler struct {
 	mu      sync.Mutex

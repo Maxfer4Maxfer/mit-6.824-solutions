@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	cleanupStaleSessionCheckPeriod = 500 * time.Microsecond
-	refreshConfigPeriod            = 300 * time.Microsecond
+	cleanupStaleSessionCheckPeriod = 500 * time.Millisecond
+	refreshConfigPeriod            = 300 * time.Millisecond
+	checkTransferPeriod            = 100 * time.Millisecond
 )
 
 type OpType int
@@ -785,7 +786,7 @@ func (kv *ShardKV) choiceOfTheRoad(
 }
 
 func (kv *ShardKV) transferReconfig() {
-	ticker := time.NewTicker(refreshConfigPeriod)
+	ticker := time.NewTicker(checkTransferPeriod)
 	log := raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopic("TRANS"))
 
 	for range ticker.C {
