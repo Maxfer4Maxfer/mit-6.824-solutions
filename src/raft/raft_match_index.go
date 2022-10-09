@@ -75,6 +75,13 @@ func (rf *Raft) matchIndexProcessing() {
 					continue
 				}
 
+				if rf.log.Term(N) != rf.currentTerm {
+					log.Printf("Index %d from previous term IT:%d CT:%d ",
+						N, rf.log.Term(N), rf.currentTerm)
+
+					continue
+				}
+
 				if hMatchIndex[N] < len(rf.peers)/2+1 {
 					log.Printf("Index %d not on server majority h[%d]:%d < %d",
 						N, N, hMatchIndex[N], len(rf.peers)/2+1)
