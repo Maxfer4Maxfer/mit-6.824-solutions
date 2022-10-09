@@ -289,8 +289,6 @@ func (rf *Raft) sync(
 	index int,
 	args *AppendEntriesArgs,
 ) bool {
-	reply := &AppendEntriesReply{}
-
 	for {
 		rf.mu.Lock()
 
@@ -330,6 +328,8 @@ func (rf *Raft) sync(
 		log.Printf("-> %s {T:%d PLI:%d PLT:%d LC:%d len(Entries):%d}",
 			rf.peerName(peerID), args.Term, args.PrevLogIndex, args.PrevLogTerm,
 			args.LeaderCommit, len(args.Entries))
+
+		reply := &AppendEntriesReply{}
 
 		if ok := rf.sendAppendEntries(peerID, args, reply); !ok {
 			log.Printf("WRN fail AppendEntries call to %d peer", peerID)
