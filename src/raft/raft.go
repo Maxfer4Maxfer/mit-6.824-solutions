@@ -348,6 +348,7 @@ func (rf *Raft) Kill() {
 	)
 
 	rf.heartbeats.StopSending()
+	rf.leaderElection.StopTicker()
 	rf.leaderElection.StopLeaderElection()
 }
 
@@ -401,7 +402,7 @@ func (rf *Raft) peerName(peerID int) string {
 // Make() must return quickly, so it should start goroutines
 // for any long-running work.
 func Make(
-	peers []*labrpc.ClientEnd, me int, persister *Persister, 
+	peers []*labrpc.ClientEnd, me int, persister *Persister,
 	applyCh chan ApplyMsg, opts ...func(*Raft),
 ) *Raft {
 	rand.Seed(MakeSeed())
