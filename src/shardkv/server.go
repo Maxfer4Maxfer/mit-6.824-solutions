@@ -20,7 +20,7 @@ import (
 const (
 	cleanupStaleSessionCheckPeriod = 500 * time.Millisecond
 	refreshConfigPeriod            = 300 * time.Millisecond
-	checkTransferPeriod            = 100 * time.Millisecond
+	checkTransferPeriod            = 200 * time.Millisecond
 )
 
 type OpType int
