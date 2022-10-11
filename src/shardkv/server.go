@@ -917,7 +917,9 @@ func (kv *ShardKV) transferToShard(
 	}
 
 	var (
-		requestID = fmt.Sprintf("%d%d_%d", kv.gid, kv.me, config.Num)
+		gid     = config.Shards[shard]
+		requestID = fmt.Sprintf("%d%d%d_%d", kv.gid, kv.me, gid, config.Num)
+		servers = config.Groups[gid]
 		args      = TransferArgs{
 			RequestID: requestID,
 			ConfigNum: config.Num,
@@ -925,8 +927,6 @@ func (kv *ShardKV) transferToShard(
 			KeyValues: kvPairs,
 			DRequests: dRequests,
 		}
-		gid     = config.Shards[shard]
-		servers = config.Groups[gid]
 	)
 
 	args.CorrelationID = raft.NewCorrelationID()
