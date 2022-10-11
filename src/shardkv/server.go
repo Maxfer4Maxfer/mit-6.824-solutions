@@ -278,14 +278,7 @@ func (kv *ShardKV) callRaft(ctx context.Context, op Op) Err {
 				return
 			}
 
-			lockedShards := kv.reconfig[kv.configNum].LockedShards
-			if gid, ok := lockedShards[key2shard(op.Key)]; ok && gid != -1 {
-				log.Printf("Waiting transfer from previous group GID:%d", gid)
-
-				resultFunc(ErrWrongGroup)
-
-				return
-			}
+			op.ConfigNum = kv.configNum
 		}
 
 		s, ok := kv.sessions[op.RequestID]
@@ -384,36 +377,39 @@ func (kv *ShardKV) cleanupStaleSessions() {
 func (kv *ShardKV) processOp(op Op) Err {
 	log := raft.ExtendLoggerWithTopic(kv.log, raft.LoggerTopicApply)
 
+	if op.Type == OpTypePut || op.Type == OpTypeAppend || op.Type == OpTypeGet {
+		if op.ConfigNum != kv.configNum {
+			log.Printf("%s wrong config number opCN:%d != curCN:%d",
+				op.Type, op.ConfigNum, kv.configNum)
+
+			return ErrWrongConfigNumber
+		}
+
+		if kv.config().Shards[key2shard(op.Key)] != kv.gid {
+			log.Printf("%s wrong shard group RGUID:%d != GID:%d",
+				op.Type, kv.config().Shards[key2shard(op.Key)], kv.gid)
+
+			return ErrWrongGroup
+		}
+
+		lockedShards := kv.reconfig[kv.configNum].LockedShards
+		if gid, ok := lockedShards[key2shard(op.Key)]; ok && gid != -1 {
+			log.Printf("%s waiting transfer from previous group GID:%d",
+				op.Type, gid)
+
+			return ErrWrongGroup
+		}
+	}
+
 	switch op.Type {
 	case OpTypeGet:
-		if kv.config().Shards[key2shard(op.Key)] != kv.gid {
-			log.Printf("Get wrong shard group RGUID:%d != GID:%d",
-				kv.config().Shards[key2shard(op.Key)], kv.gid)
-
-			return ErrWrongGroup
-		}
-
 		kv.log.Printf("Apply Get rID:%s K:%s", op.RequestID, op.Key)
 	case OpTypePut:
-		if kv.config().Shards[key2shard(op.Key)] != kv.gid {
-			log.Printf("Put wrong shard group RGUID:%d != GID:%d",
-				kv.config().Shards[key2shard(op.Key)], kv.gid)
-
-			return ErrWrongGroup
-		}
-
 		kv.store[op.Key] = op.Value
 
 		kv.log.Printf("Apply %s rID:%s K:%s V:%s",
 			OpTypePut, op.RequestID, op.Key, op.Value)
 	case OpTypeAppend:
-		if kv.config().Shards[key2shard(op.Key)] != kv.gid {
-			log.Printf("Append wrong shard group RGUID:%d != GID:%d",
-				kv.config().Shards[key2shard(op.Key)], kv.gid)
-
-			return ErrWrongGroup
-		}
-
 		v := kv.store[op.Key]
 		kv.store[op.Key] = v + op.Value
 
