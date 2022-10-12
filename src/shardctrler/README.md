@@ -4,14 +4,14 @@ Solution for [Lab 4A: The Shard controller](https://pdos.csail.mit.edu/6.824/lab
 
 Tests:
 ```sh
-❯ time python3 mtests.py  --workers 4 -n 40 4A
+❯ time python3 mtests.py  --workers 4 -n 120 4A
 ┏━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━┓
 ┃ Test      ┃ Failed ┃ Total ┃        Time ┃
 ┡━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━┩
-│ TestBasic │      0 │    40 │ 2.83 ± 0.50 │
-│ TestMulti │      0 │    40 │ 1.85 ± 0.40 │
+│ TestBasic │      0 │   120 │ 2.75 ± 0.36 │
+│ TestMulti │      0 │   120 │ 1.78 ± 0.28 │
 └───────────┴────────┴───────┴─────────────┘
-112.74s user 37.34s system 310% cpu 48.391 total
+324.95s user 104.59s system 312% cpu 2:17.35 total
 ```
 
 Environment:

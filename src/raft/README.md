@@ -4,39 +4,39 @@ Solution for [Lab 2: Raft](https://pdos.csail.mit.edu/6.824/labs/lab-raft.html)
 
 Tests:
 ```sh
-❯ time python3 mtests.py  --timeout 2m --workers 4 -n 40 2A 2B 2C 2D
+❯ time python3 mtests.py  --timeout 2m --workers 4 -n 120 2A 2B 2C 2D
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┓
 ┃ Test                             ┃ Failed ┃ Total ┃         Time ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━┩
-│ TestInitialElection2A            │      0 │    40 │  3.52 ± 0.13 │
-│ TestReElection2A                 │      0 │    40 │  4.98 ± 0.14 │
-│ TestManyElections2A              │      0 │    40 │  5.96 ± 0.15 │
-│ TestBasicAgree2B                 │      0 │    40 │  1.00 ± 0.13 │
-│ TestRPCBytes2B                   │      0 │    40 │  1.86 ± 0.05 │
-│ TestFor2023TestFollowerFailure2B │      0 │    40 │  4.94 ± 0.09 │
-│ TestFor2023TestLeaderFailure2B   │      0 │    40 │  5.16 ± 0.11 │
-│ TestFailAgree2B                  │      0 │    40 │  5.35 ± 0.78 │
-│ TestFailNoAgree2B                │      0 │    40 │  3.81 ± 0.08 │
-│ TestConcurrentStarts2B           │      0 │    40 │  1.05 ± 0.09 │
-│ TestRejoin2B                     │      0 │    40 │  4.98 ± 0.94 │
-│ TestBackup2B                     │      0 │    40 │ 17.99 ± 0.13 │
-│ TestCount2B                      │      0 │    40 │  2.57 ± 0.09 │
-│ TestPersist12C                   │      0 │    40 │  3.51 ± 0.10 │
-│ TestPersist22                    │      0 │    40 │ 15.51 ± 0.92 │
-│ TestPersist32C                   │      0 │    40 │  1.82 ± 0.10 │
-│ TestFigure82C                    │      0 │    40 │ 31.96 ± 2.45 │
-│ TestUnreliableAgree2C            │      0 │    40 │  1.84 ± 0.16 │
-│ TestFigure8Unreliable2C          │      0 │    40 │ 34.60 ± 2.37 │
-│ TestReliableChurn2C              │      0 │    40 │ 16.82 ± 0.18 │
-│ TestUnreliableChurn2C            │      0 │    40 │ 16.81 ± 0.15 │
-│ TestSnapshotBasic2D              │      0 │    40 │  4.60 ± 0.09 │
-│ TestSnapshotInstall2D            │      0 │    40 │ 41.61 ± 2.82 │
-│ TestSnapshotInstallUnreliable2D  │      0 │    40 │ 54.97 ± 3.88 │
-│ TestSnapshotInstallCrash2D       │      0 │    40 │ 26.96 ± 0.28 │
-│ TestSnapshotInstallUnCrash2D     │      0 │    40 │ 29.23 ± 0.62 │
-│ TestSnapshotAllCrash2D           │      0 │    40 │  7.85 ± 0.76 │
+│ TestInitialElection2A            │      0 │   120 │  3.57 ± 0.15 │
+│ TestReElection2A                 │      0 │   120 │  5.05 ± 0.19 │
+│ TestManyElections2A              │      0 │   120 │  6.03 ± 0.20 │
+│ TestBasicAgree2B                 │      0 │   120 │  1.07 ± 0.17 │
+│ TestRPCBytes2B                   │      0 │   120 │  1.94 ± 0.14 │
+│ TestFor2023TestFollowerFailure2B │      0 │   120 │  5.03 ± 0.15 │
+│ TestFor2023TestLeaderFailure2B   │      0 │   120 │  5.27 ± 0.17 │
+│ TestFailAgree2B                  │      0 │   120 │  5.50 ± 0.75 │
+│ TestFailNoAgree2B                │      0 │   120 │  3.89 ± 0.12 │
+│ TestConcurrentStarts2B           │      0 │   120 │  1.11 ± 0.15 │
+│ TestRejoin2B                     │      0 │   120 │  5.30 ± 1.02 │
+│ TestBackup2B                     │      0 │   120 │ 17.94 ± 0.57 │
+│ TestCount2B                      │      0 │   120 │  2.66 ± 0.16 │
+│ TestPersist12C                   │      0 │   120 │  3.59 ± 0.25 │
+│ TestPersist22                    │      0 │   120 │ 15.33 ± 0.72 │
+│ TestPersist32C                   │      0 │   120 │  1.90 ± 0.16 │
+│ TestFigure82C                    │      0 │   120 │ 31.99 ± 2.54 │
+│ TestUnreliableAgree2C            │      0 │   120 │  1.90 ± 0.20 │
+│ TestFigure8Unreliable2C          │      0 │   120 │ 34.43 ± 2.75 │
+│ TestReliableChurn2C              │      0 │   120 │ 16.89 ± 0.24 │
+│ TestUnreliableChurn2C            │      0 │   120 │ 16.95 ± 0.25 │
+│ TestSnapshotBasic2D              │      0 │   120 │  4.71 ± 0.19 │
+│ TestSnapshotInstall2D            │      0 │   120 │ 42.19 ± 3.25 │
+│ TestSnapshotInstallUnreliable2D  │      0 │   120 │ 54.13 ± 5.17 │
+│ TestSnapshotInstallCrash2D       │      0 │   120 │ 27.00 ± 0.32 │
+│ TestSnapshotInstallUnCrash2D     │      0 │   120 │ 29.46 ± 0.72 │
+│ TestSnapshotAllCrash2D           │      0 │   120 │  8.16 ± 0.71 │
 └──────────────────────────────────┴────────┴───────┴──────────────┘
-2702.19s user 697.95s system 96% cpu 58:50.57 total
+8990.09s user 2311.84s system 106% cpu 2:56:43.65 total
 ```
 
 Environment:

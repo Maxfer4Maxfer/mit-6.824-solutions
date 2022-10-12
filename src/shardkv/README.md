@@ -4,25 +4,25 @@ Solution for [Lab 4B: Sharded Key/Value Server](https://pdos.csail.mit.edu/6.824
 
 Tests:
 ```sh
-❯ time python3 mtests.py --workers 4 -n 40 4B
+❯ time python3 mtests.py --workers 4 -n 120 4B
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┓
 ┃ Test                     ┃ Failed ┃ Total ┃         Time ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━┩
-│ TestStaticShards         │      0 │    40 │  4.37 ± 0.24 │
-│ TestJoinLeave            │      0 │    40 │  3.04 ± 0.26 │
-│ TestSnapshot             │      0 │    40 │  6.15 ± 0.41 │
-│ TestMissChange           │      0 │    40 │  9.11 ± 0.55 │
-│ TestConcurrent1          │      0 │    40 │  5.07 ± 0.21 │
-│ TestConcurrent2          │      0 │    40 │ 15.00 ± 0.24 │
-│ TestConcurrent3          │      0 │    40 │ 17.05 ± 0.76 │
-│ TestUnreliable1          │      0 │    40 │ 10.08 ± 1.37 │
-│ TestUnreliable2          │      0 │    40 │  8.29 ± 0.42 │
-│ TestUnreliable3          │      0 │    40 │  8.18 ± 0.49 │
-│ TestChallenge1Delete     │      0 │    40 │ 18.64 ± 0.27 │
-│ TestChallenge2Unaffected │      0 │    40 │  7.30 ± 0.77 │
-│ TestChallenge2Partial    │      0 │    40 │  5.58 ± 0.58 │
+│ TestStaticShards         │      0 │   120 │  4.51 ± 0.17 │
+│ TestJoinLeave            │      0 │   120 │  3.05 ± 0.28 │
+│ TestSnapshot             │      0 │   120 │  6.13 ± 0.31 │
+│ TestMissChange           │      0 │   120 │  9.29 ± 0.54 │
+│ TestConcurrent1          │      0 │   120 │  5.12 ± 0.24 │
+│ TestConcurrent2          │      0 │   120 │ 15.09 ± 0.32 │
+│ TestConcurrent3          │      0 │   120 │ 17.36 ± 0.81 │
+│ TestUnreliable1          │      0 │   120 │ 10.29 ± 1.29 │
+│ TestUnreliable2          │      0 │   120 │  8.26 ± 0.45 │
+│ TestUnreliable3          │      0 │   120 │  8.17 ± 0.46 │
+│ TestChallenge1Delete     │      0 │   120 │ 18.59 ± 0.24 │
+│ TestChallenge2Unaffected │      0 │   120 │  7.21 ± 0.76 │
+│ TestChallenge2Partial    │      0 │   120 │  5.67 ± 0.53 │
 └──────────────────────────┴────────┴───────┴──────────────┘
-3233.35s user 641.11s system 326% cpu 19:45.94 total
+9697.86s user 1918.05s system 325% cpu 59:32.82 total
 ```
 
 Environment:

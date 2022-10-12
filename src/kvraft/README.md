@@ -4,35 +4,35 @@ Solution for [Lab 3: Fault-tolerant Key/Value Service](https://pdos.csail.mit.ed
 
 Tests:
 ```sh
-❯ time python3 mtests.py --timeout 2m --workers 4 -n 40 3A 3B
+❯ time python3 mtests.py --timeout 1m --workers 4 -n 120 3A 3B
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┓
 ┃ Test                                                           ┃ Failed ┃ Total ┃         Time ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━┩
-│ TestBasic3A                                                    │      0 │    40 │ 15.90 ± 0.12 │
-│ TestSpeed3A                                                    │      0 │    40 │  6.78 ± 0.39 │
-│ TestConcurrent3A                                               │      0 │    40 │ 16.35 ± 0.36 │
-│ TestUnreliable3A                                               │      0 │    40 │ 16.58 ± 0.11 │
-│ TestUnreliableOneKey3A                                         │      0 │    40 │  1.85 ± 0.21 │
-│ TestOnePartition3A                                             │      0 │    40 │  3.62 ± 0.19 │
-│ TestManyPartitionsOneClient3A                                  │      0 │    40 │ 23.61 ± 0.29 │
-│ TestManyPartitionsManyClients3A                                │      0 │    40 │ 23.74 ± 0.33 │
-│ TestPersistOneClient3A                                         │      0 │    40 │ 21.65 ± 0.37 │
-│ TestPersistConcurrent3A                                        │      0 │    40 │ 23.79 ± 0.58 │
-│ TestPersistConcurrentUnreliable3A                              │      0 │    40 │ 22.80 ± 0.30 │
-│ TestPersistPartition3A                                         │      0 │    40 │ 29.44 ± 0.67 │
-│ TestPersistPartitionUnreliable3A                               │      0 │    40 │ 28.80 ± 0.37 │
-│ TestPersistPartitionUnreliableLinearizable3A                   │      0 │    40 │ 31.39 ± 0.56 │
-│ TestSnapshotRPC3B                                              │      0 │    40 │  2.61 ± 0.22 │
-│ TestSnapshotSize3B                                             │      0 │    40 │  2.52 ± 0.28 │
-│ TestSpeed3B                                                    │      0 │    40 │  3.17 ± 0.21 │
-│ TestSnapshotRecover3B                                          │      0 │    40 │ 20.03 ± 0.22 │
-│ TestSnapshotRecoverManyClients3B                               │      0 │    40 │ 20.53 ± 0.22 │
-│ TestSnapshotUnreliable3B                                       │      0 │    40 │ 16.85 ± 0.25 │
-│ TestSnapshotUnreliableRecover3B                                │      0 │    40 │ 20.63 ± 0.34 │
-│ TestSnapshotUnreliableRecoverConcurrentPartition3B             │      0 │    40 │ 27.82 ± 0.35 │
-│ TestSnapshotUnreliableRecoverConcurrentPartitionLinearizable3B │      0 │    40 │ 28.90 ± 0.33 │
+│ TestBasic3A                                                    │      0 │   120 │ 15.92 ± 0.19 │
+│ TestSpeed3A                                                    │      0 │   120 │  6.79 ± 0.61 │
+│ TestConcurrent3A                                               │      0 │   120 │ 16.26 ± 0.18 │
+│ TestUnreliable3A                                               │      0 │   120 │ 16.61 ± 0.21 │
+│ TestUnreliableOneKey3A                                         │      0 │   120 │  1.77 ± 0.19 │
+│ TestOnePartition3A                                             │      0 │   120 │  3.63 ± 0.23 │
+│ TestManyPartitionsOneClient3A                                  │      0 │   120 │ 23.63 ± 0.26 │
+│ TestManyPartitionsManyClients3A                                │      0 │   120 │ 23.79 ± 0.32 │
+│ TestPersistOneClient3A                                         │      0 │   120 │ 21.64 ± 0.37 │
+│ TestPersistConcurrent3A                                        │      0 │   120 │ 23.72 ± 0.56 │
+│ TestPersistConcurrentUnreliable3A                              │      0 │   120 │ 22.77 ± 0.35 │
+│ TestPersistPartition3A                                         │      0 │   120 │ 29.52 ± 0.88 │
+│ TestPersistPartitionUnreliable3A                               │      0 │   120 │ 28.84 ± 0.60 │
+│ TestPersistPartitionUnreliableLinearizable3A                   │      0 │   120 │ 31.30 ± 0.63 │
+│ TestSnapshotRPC3B                                              │      0 │   120 │  2.57 ± 0.21 │
+│ TestSnapshotSize3B                                             │      0 │   120 │  2.45 ± 0.24 │
+│ TestSpeed3B                                                    │      0 │   120 │  3.20 ± 0.41 │
+│ TestSnapshotRecover3B                                          │      0 │   120 │ 19.97 ± 0.25 │
+│ TestSnapshotRecoverManyClients3B                               │      0 │   120 │ 20.66 ± 0.43 │
+│ TestSnapshotUnreliable3B                                       │      0 │   120 │ 16.81 ± 0.21 │
+│ TestSnapshotUnreliableRecover3B                                │      0 │   120 │ 20.65 ± 0.34 │
+│ TestSnapshotUnreliableRecoverConcurrentPartition3B             │      0 │   120 │ 27.81 ± 0.33 │
+│ TestSnapshotUnreliableRecoverConcurrentPartitionLinearizable3B │      0 │   120 │ 28.87 ± 0.41 │
 └────────────────────────────────────────────────────────────────┴────────┴───────┴──────────────┘
-11633.71s user 2154.41s system 335% cpu 1:08:30.44 total
+34403.67s user 6760.87s system 334% cpu 3:25:00.79 total
 ```
 
 Environment:
